@@ -80,16 +80,29 @@ def draw_play_button_with_icon(y, mouse_pos):
     color = BUTTON_HOVER if rect.collidepoint(mouse_pos) else BUTTON_COLOR
     pygame.draw.rect(screen, color, rect, border_radius=10)
 
-    # Bomb icon scaled
-    icon = scale_image_preserve_ratio(bomb_img, max_height=40)
-    icon_rect = icon.get_rect()
-    icon_rect.centery = y
-    icon_rect.left = rect.left + 10
-    screen.blit(icon, icon_rect)
+    # icon + text surfaces
+    icon = scale_image_preserve_ratio(bomb_img, max_height=36)
+    fnt = pygame.font.SysFont(None, 48)
+    text_surface = fnt.render("Play", True, TEXT_COLOR)
 
-    # Draw text next to icon
-    draw_text("Play", y, center=False, size=36, color=TEXT_COLOR)
+    total_width = icon.get_width() + 10 + text_surface.get_width()
+
+    icon_x = rect.centerx - total_width // 2
+    text_x = icon_x + icon.get_width() + 10
+
+    icon_rect = icon.get_rect()
+    icon_rect.left = icon_x
+    icon_rect.centery = y
+
+    text_rect = text_surface.get_rect()
+    text_rect.left = text_x
+    text_rect.centery = y
+
+    screen.blit(icon, icon_rect)
+    screen.blit(text_surface, text_rect)
+
     return rect
+
 
 def show_main_menu(mouse_pos):
     screen.fill(BG_COLOR)
