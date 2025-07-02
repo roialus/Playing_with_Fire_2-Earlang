@@ -1,113 +1,157 @@
 import pygame
 import sys
+import os
 
-# Initialize Pygame and set up the screen
-pygame.init()   # Initialize Pygame
-SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600  # Set screen dimensions
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT)) # Create the screen
-pygame.display.set_caption("Playing With Fire 2")   # Set the window title
-font = pygame.font.SysFont(None, 48)    # Load a default font
+# Redirect stdout for Erlang communication, and suppress pygame startup output
+sys.stdout = open(sys.stdout.fileno(), mode='w', buffering=1, encoding='utf-8', errors='replace')
+sys.stderr = open(os.devnull, 'w')
 
-# Load the background image
-WHITE = (255, 255, 255) # Define a white color
-BLACK = (0, 0, 0)   # Define a black color
-GRAY = (160, 160, 160)  # Define a gray color
-RED = (200, 50, 50) # Define a red color
+# Initialize Pygame
+pygame.init()
+SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+pygame.display.set_caption("Playing With Fire 2")
+
+# Colors
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+GRAY = (160, 160, 160)
+RED = (200, 50, 50)
+BG_COLOR = (230, 210, 180)  # Warm brown-ish background for consistency
+
+# Fonts
+font = pygame.font.SysFont("arial", 48)
+title_font = pygame.font.SysFont("impact", 80)
 
 # Global state
-current_screen = "main_menu"    # Track the current screen
-button_clicked = None  # Used to send back to Erlang
+current_screen = "main_menu"
+dot_count = 1
+dot_timer = pygame.time.get_ticks()
+
+# Load images
+logo_img = pygame.image.load("assets/logo.png").convert_alpha()
+bomb_img = pygame.image.load("assets/bomb.png").convert_alpha()
 
 def draw_text(text, y, center=True, size=48, color=BLACK):
-    font = pygame.font.SysFont(None, size)  # Load the font with the specified size
-    text_surface = font.render(text, True, color)   # Render the text surface
-    rect = text_surface.get_rect(center=(SCREEN_WIDTH // 2, y)) if center else text_surface.get_rect(topleft=(20, y))   # Get the rectangle for the text surface
-    screen.blit(text_surface, rect) # Draw the text surface on the screen
+    fnt = pygame.font.SysFont(None, size)
+    surface = fnt.render(text, True, color)
+    rect = surface.get_rect(center=(SCREEN_WIDTH // 2, y) if center else (20, y))
+    screen.blit(surface, rect)
+
+def draw_screen_template(title, title_y=100):
+    screen.fill(BG_COLOR)
+    title_surface = title_font.render(title, True, BLACK)
+    title_rect = title_surface.get_rect(center=(SCREEN_WIDTH // 2, title_y))
+    screen.blit(title_surface, title_rect)
 
 def draw_button(text, y):
-    button_rect = pygame.Rect(0, 0, 200, 50)    # Create a rectangle for the button
-    button_rect.center = (SCREEN_WIDTH // 2, y) # Center the button rectangle
-    pygame.draw.rect(screen, GRAY, button_rect) # Draw the button rectangle
-    draw_text(text, y, size=36) # Draw the button text
+    rect = pygame.Rect(0, 0, 300, 60)
+    rect.center = (SCREEN_WIDTH // 2, y)
+    pygame.draw.rect(screen, GRAY, rect, border_radius=10)
+    draw_text(text, y, size=36)
+    return rect
+
+def draw_play_button_with_icon(y):
+    button_rect = pygame.Rect(0, 0, 300, 60)
+    button_rect.center = (SCREEN_WIDTH // 2, y)
+    pygame.draw.rect(screen, GRAY, button_rect, border_radius=10)
+
+    # Draw bomb icon to the left inside the button
+    icon_scaled = pygame.transform.scale(bomb_img, (40, 40))
+    icon_rect = icon_scaled.get_rect()
+    icon_rect.centery = y
+    icon_rect.left = button_rect.left + 10
+    screen.blit(icon_scaled, icon_rect)
+
+    # Draw text offset to the right of icon
+    draw_text("Play", y, center=False, size=36, color=BLACK)
     return button_rect
 
 def show_main_menu():
-    screen.fill(WHITE)  # Fill the screen with white color
-    draw_text("Playing With Fire 2", 150, size=60)  # Draw the title text
+    screen.fill(BG_COLOR)
 
-    play_btn = draw_button("Play", 300) # Draw the play button
-    exit_btn = draw_button("Exit", 380) # Draw the exit button
-    return [("play_clicked", play_btn), ("exit_clicked", exit_btn)] # Return the button click events
+    logo_scaled = pygame.transform.scale(logo_img, (400, 100))  # Adjust size as needed
+    logo_rect = logo_scaled.get_rect(center=(SCREEN_WIDTH // 2, 120))
+    screen.blit(logo_scaled, logo_rect)
+    
+    play_btn = draw_play_button_with_icon(300)
+    exit_btn = draw_button("Exit", 390)
+    return [("play_clicked", play_btn), ("exit_clicked", exit_btn)]
 
 def show_loading():
-    screen.fill(WHITE)
-    draw_text("Connecting to server...", SCREEN_HEIGHT // 2, size=40)   # Draw the loading text
+    global dot_count, dot_timer
+    draw_screen_template("")
 
+    # Animate dots every 500ms
+    if pygame.time.get_ticks() - dot_timer > 500:
+        dot_count = (dot_count % 3) + 1
+        dot_timer = pygame.time.get_ticks()
+
+    draw_text("Connecting to server" + "." * dot_count, SCREEN_HEIGHT // 2, size=40)
 
 def show_error():
-    screen.fill(WHITE)
-    draw_text("Failed To Connect", 150, size=60)    # Draw the error text
-
-    retry_btn = draw_button("Retry", 300)   # Draw the retry button
-    return_btn = draw_button("Return To Main Menu", 380)    # Draw the return button
+    draw_screen_template("Failed To Connect")
+    retry_btn = draw_button("Retry", 300)
+    return_btn = draw_button("Return To Main Menu", 380)
     return [("retry_clicked", retry_btn), ("return_to_menu", return_btn)]
 
-
 def send_event(event_str):
-    sys.stdout.write(event_str + "\n")  # Write the event to stdout
-    sys.stdout.flush()  # Flush the output buffer to ensure the event is sent immediately
-
+    try:
+        sys.stdout.write(event_str + "\n")
+        sys.stdout.flush()
+    except BrokenPipeError:
+        pygame.quit()
+        return
 
 def listen_for_commands():
     import threading
-
     def reader():
-        global current_screen   # Use global variable to track the current screen
+        global current_screen
         for line in sys.stdin:
-            cmd = line.strip()  # Read a command from stdin
+            cmd = line.strip()
             if cmd in {"show_main_menu", "show_loading", "show_error"}:
-                current_screen = cmd    # Update the current screen based on the command
+                current_screen = cmd
+    threading.Thread(target=reader, daemon=True).start()
 
-    threading.Thread(target=reader, daemon=True).start()    # Start a thread to listen for commands
-
-
-# MAIN LOOP
 def main():
-    global current_screen   # Use global variable to track the current screen
-    listen_for_commands()   # Start listening for commands
+    global current_screen
+    listen_for_commands()
+    current_screen = "show_main_menu"
 
-    clock = pygame.time.Clock() # Create a clock to control the frame rate
-    buttons = []    # Initialize buttons list
+    clock = pygame.time.Clock()
+    buttons = []
 
-    while True:
-        screen.fill(WHITE)
+    running = True
+    while running:
+        mouse_pos = pygame.mouse.get_pos()
+        screen.fill(BG_COLOR)
 
-        # Draw appropriate screen
         if current_screen == "show_main_menu":
-            buttons = show_main_menu()  # Show the main menu and get the buttons
+            buttons = show_main_menu()
         elif current_screen == "show_loading":
-            show_loading()  # Show the loading screen
-            buttons = []    # No buttons on the loading screen
+            show_loading()
+            buttons = []
         elif current_screen == "show_error":
-            buttons = show_error()  # Show the error screen and get the buttons
+            buttons = show_error()
         else:
-            draw_text("Waiting for command...", SCREEN_HEIGHT // 2) # Default message if no command received
-            buttons = []    # No buttons on the default screen
+            draw_text("Waiting for command...", SCREEN_HEIGHT // 2)
+            buttons = []
 
-        # Handle events
-        for event in pygame.event.get():    # Process Pygame events
-            if event.type == pygame.QUIT:   # Check if the window is closed
-                pygame.quit()   # Quit Pygame
-                sys.exit()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                running = False
 
-            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:    # Check for left mouse button click
-                for label, rect in buttons:   # Iterate through the buttons
-                    if rect.collidepoint(event.pos):    # Check if the mouse click is within the button rectangle
-                        send_event(label)   # Send the button click event
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                for label, rect in buttons:
+                    if rect.collidepoint(event.pos):
+                        send_event(label)
+                        if label == "exit_clicked":
+                            pygame.quit()
+                            running = False
 
-        pygame.display.flip()   # Update the display
-        clock.tick(60)  # Control the frame rate to 60 FPS
-
+        pygame.display.flip()
+        clock.tick(60)
 
 if __name__ == "__main__":
     main()
