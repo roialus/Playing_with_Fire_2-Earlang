@@ -4,7 +4,7 @@ import os
 
 # Redirect stdout for Erlang communication, and suppress pygame startup output
 sys.stdout = open(sys.stdout.fileno(), mode='w', buffering=1, encoding='utf-8', errors='replace')
-sys.stderr = open(os.devnull, 'w')
+# sys.stderr = open(os.devnull, 'w')
 
 # Initialize Pygame
 pygame.init()
@@ -17,7 +17,7 @@ WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 GRAY = (160, 160, 160)
 RED = (200, 50, 50)
-BG_COLOR = (230, 210, 180)  # Warm brown-ish background for consistency
+BG_COLOR = (78, 53, 36)  # Warm brown-ish background for consistency
 
 # Fonts
 font = pygame.font.SysFont("arial", 48)
@@ -32,6 +32,24 @@ dot_timer = pygame.time.get_ticks()
 logo_img = pygame.image.load("assets/logo.png").convert_alpha()
 bomb_img = pygame.image.load("assets/bomb.png").convert_alpha()
 
+def scale_image_preserve_ratio(image, max_width=None, max_height=None):
+    original_width, original_height = image.get_size()
+    aspect_ratio = original_width / original_height
+
+    if max_width and not max_height:
+        width = max_width
+        height = int(width / aspect_ratio)
+    elif max_height and not max_width:
+        height = max_height
+        width = int(height * aspect_ratio)
+    elif max_width and max_height:
+        width = min(max_width, int(max_height * aspect_ratio))
+        height = min(max_height, int(max_width / aspect_ratio))
+    else:
+        width, height = original_width, original_height
+
+    return pygame.transform.smoothscale(image, (width, height))
+
 def draw_text(text, y, center=True, size=48, color=BLACK):
     fnt = pygame.font.SysFont(None, size)
     surface = fnt.render(text, True, color)
@@ -44,38 +62,44 @@ def draw_screen_template(title, title_y=100):
     title_rect = title_surface.get_rect(center=(SCREEN_WIDTH // 2, title_y))
     screen.blit(title_surface, title_rect)
 
-def draw_button(text, y):
+BUTTON_COLOR = (240, 120, 60)        # Warm orange for buttons
+BUTTON_HOVER = (255, 160, 100)       # Lighter orange for hover effect
+TEXT_COLOR = (30, 30, 30)            # Dark text color for contrast
+
+def draw_button(text, y, mouse_pos):
     rect = pygame.Rect(0, 0, 300, 60)
     rect.center = (SCREEN_WIDTH // 2, y)
-    pygame.draw.rect(screen, GRAY, rect, border_radius=10)
-    draw_text(text, y, size=36)
+    color = BUTTON_HOVER if rect.collidepoint(mouse_pos) else BUTTON_COLOR
+    pygame.draw.rect(screen, color, rect, border_radius=10)
+    draw_text(text, y, size=36, color=TEXT_COLOR)
     return rect
 
-def draw_play_button_with_icon(y):
-    button_rect = pygame.Rect(0, 0, 300, 60)
-    button_rect.center = (SCREEN_WIDTH // 2, y)
-    pygame.draw.rect(screen, GRAY, button_rect, border_radius=10)
+def draw_play_button_with_icon(y, mouse_pos):
+    rect = pygame.Rect(0, 0, 300, 60)
+    rect.center = (SCREEN_WIDTH // 2, y)
+    color = BUTTON_HOVER if rect.collidepoint(mouse_pos) else BUTTON_COLOR
+    pygame.draw.rect(screen, color, rect, border_radius=10)
 
-    # Draw bomb icon to the left inside the button
-    icon_scaled = pygame.transform.scale(bomb_img, (40, 40))
-    icon_rect = icon_scaled.get_rect()
+    # Bomb icon scaled
+    icon = scale_image_preserve_ratio(bomb_img, max_height=40)
+    icon_rect = icon.get_rect()
     icon_rect.centery = y
-    icon_rect.left = button_rect.left + 10
-    screen.blit(icon_scaled, icon_rect)
+    icon_rect.left = rect.left + 10
+    screen.blit(icon, icon_rect)
 
-    # Draw text offset to the right of icon
-    draw_text("Play", y, center=False, size=36, color=BLACK)
-    return button_rect
+    # Draw text next to icon
+    draw_text("Play", y, center=False, size=36, color=TEXT_COLOR)
+    return rect
 
-def show_main_menu():
+def show_main_menu(mouse_pos):
     screen.fill(BG_COLOR)
 
-    logo_scaled = pygame.transform.scale(logo_img, (400, 100))  # Adjust size as needed
+    logo_scaled = scale_image_preserve_ratio(logo_img, max_width=400)
     logo_rect = logo_scaled.get_rect(center=(SCREEN_WIDTH // 2, 120))
     screen.blit(logo_scaled, logo_rect)
     
-    play_btn = draw_play_button_with_icon(300)
-    exit_btn = draw_button("Exit", 390)
+    play_btn = draw_play_button_with_icon(300, mouse_pos) 
+    exit_btn = draw_button("Exit", 390, mouse_pos)
     return [("play_clicked", play_btn), ("exit_clicked", exit_btn)]
 
 def show_loading():
@@ -89,10 +113,10 @@ def show_loading():
 
     draw_text("Connecting to server" + "." * dot_count, SCREEN_HEIGHT // 2, size=40)
 
-def show_error():
+def show_error(mouse_pos):
     draw_screen_template("Failed To Connect")
-    retry_btn = draw_button("Retry", 300)
-    return_btn = draw_button("Return To Main Menu", 380)
+    retry_btn = draw_button("Retry", 300, mouse_pos)
+    return_btn = draw_button("Return To Main Menu", 380, mouse_pos)
     return [("retry_clicked", retry_btn), ("return_to_menu", return_btn)]
 
 def send_event(event_str):
@@ -127,12 +151,12 @@ def main():
         screen.fill(BG_COLOR)
 
         if current_screen == "show_main_menu":
-            buttons = show_main_menu()
+            buttons = show_main_menu(mouse_pos)
         elif current_screen == "show_loading":
             show_loading()
             buttons = []
         elif current_screen == "show_error":
-            buttons = show_error()
+            buttons = show_error(mouse_pos)
         else:
             draw_text("Waiting for command...", SCREEN_HEIGHT // 2)
             buttons = []
