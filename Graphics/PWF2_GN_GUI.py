@@ -82,13 +82,13 @@ def draw_play_button_with_icon(y, mouse_pos):
 
     # icon + text surfaces
     icon = scale_image_preserve_ratio(bomb_img, max_height=36)
-    fnt = pygame.font.SysFont(None, 48)
+    fnt = pygame.font.SysFont(None, 36)
     text_surface = fnt.render("Play", True, TEXT_COLOR)
 
-    total_width = icon.get_width() + 10 + text_surface.get_width()
+    total_width = icon.get_width() + 10 + text_surface.get_width()  
 
-    icon_x = rect.centerx - total_width // 2
-    text_x = icon_x + icon.get_width() + 10
+    icon_x = rect.centerx - total_width // 2 - 15
+    text_x = rect.centerx - 25
 
     icon_rect = icon.get_rect()
     icon_rect.left = icon_x
