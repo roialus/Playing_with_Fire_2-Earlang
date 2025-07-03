@@ -1,8 +1,7 @@
-
 -module(map_generator).
 
 -export([generate_map/0, generate_map/1, visualize_map/1, 
-         get_tile_at/3, export_map/2]).
+         get_tile_at/3, export_map/2, test_generation/0]).
 
 %% Tile type definitions
 -define(FREE, 0).         % Free spot (no tile) - walkable
@@ -11,14 +10,43 @@
 -define(STRONG, 3).       % Strong tile - needs 2 explosions to break
 -define(PLAYER_START, 4). % Player starting position
 
+%% Power-up definitions
+-define(NO_POWERUP, none).
+-define(MOVE_SPEED, move_speed).
+-define(REMOTE_IGNITION, remote_ignition).
+-define(REPEAT_BOMBS, repeat_bombs).
+-define(KICK_BOMB, kick_bomb).
+-define(PHASED, phased).
+-define(PLUS_BOMBS, plus_bombs).
+-define(BIGGER_EXPLOSION, bigger_explosion).
+-define(PLUS_LIFE, plus_life).
+-define(FREEZE_BOMB, freeze_bomb).
+
 -define(MAP_SIZE, 16).
 
 -record(map_state, {
     size = ?MAP_SIZE,
     grid,
+    powerup_grid,  % Stores power-up information for each tile
     corners = [{1, 1}, {1, 14}, {14, 1}, {14, 14}],
-    steiner_paths = []
+    steiner_paths = [],
+    statistics = #{} % Tracks tile and power-up counts
 }).
+
+%% Power-up configuration for random selection
+-define(POWERUP_CONFIG, [
+    % Rare power-ups (1 number each)
+    {?REMOTE_IGNITION, 1, rare},
+    {?REPEAT_BOMBS, 2, rare},
+    {?PHASED, 3, rare},
+    {?FREEZE_BOMB, 4, rare},
+    % Regular power-ups (2 numbers each)
+    {?MOVE_SPEED, [5, 6], regular},
+    {?KICK_BOMB, [7, 8], regular},
+    {?PLUS_BOMBS, [9, 10], regular},
+    {?BIGGER_EXPLOSION, [11, 12], regular},
+    {?PLUS_LIFE, [13, 14], regular}
+]).
 
 %% ===================================================================
 %% Public API - Simple Map Generation
@@ -39,7 +67,7 @@ generate_map(Options) ->
     Opts = maps:merge(DefaultOptions, Options),
     
     % For debugging
-    io:format("🗺️  Generating ~wx~w Erlang Map...~n", [?MAP_SIZE, ?MAP_SIZE]),
+    io:format("🗺️  Generating ~wx~w Erlang Map with Power-ups...~n", [?MAP_SIZE, ?MAP_SIZE]),
     
     % Step 1: Initialize empty map
     MapState = initialize_map(),
@@ -65,11 +93,14 @@ generate_map(Options) ->
     MapState3 = fill_remaining_areas(MapState2, Opts),
     
     % Step 7: Mark player starts
-    FinalMap = mark_player_starts(MapState3),
+    FinalMapState = mark_player_starts(MapState3),
+    
+    % Step 8: Print statistics
+    print_statistics(FinalMapState),
     
     % For debugging
     io:format("✅ Map generation complete!~n"),
-    FinalMap#map_state.grid.
+    FinalMapState#map_state.grid.
 
 %% ===================================================================
 %% Map Initialization
@@ -82,13 +113,33 @@ initialize_map() ->
         array:new(?MAP_SIZE, {default, ?FREE}) 
     end, Grid),
     
+    % Create power-up grid (same structure)
+    PowerupGrid = array:map(fun(_, _) -> 
+        array:new(?MAP_SIZE, {default, ?NO_POWERUP}) 
+    end, Grid),
+    
     % Set borders to UNBREAKABLE
     BorderGrid = set_borders(EmptyGrid),
     
     % Clear player areas
     ClearGrid = clear_player_areas(BorderGrid),
     
-    #map_state{grid = ClearGrid}.
+    % Initialize statistics
+    Stats = #{
+        tile_counts => #{
+            free => 0, breakable => 0, unbreakable => 0, 
+            strong => 0, player_start => 0
+        },
+        powerup_counts => #{
+            none => 0, move_speed => 0, remote_ignition => 0,
+            repeat_bombs => 0, kick_bomb => 0, phased => 0,
+            plus_bombs => 0, bigger_explosion => 0, plus_life => 0,
+            freeze_bomb => 0
+        },
+        powerup_locations => []
+    },
+    
+    #map_state{grid = ClearGrid, powerup_grid = PowerupGrid, statistics = Stats}.
 
 set_borders(Grid) ->
     % Set top and bottom borders
@@ -126,10 +177,116 @@ clear_player_areas(Grid) ->
     end, Grid, Corners).
 
 is_valid_position(X, Y) ->
-    X >= 1 andalso X < ?MAP_SIZE - 1 andalso Y >= 1 andalso Y < ?MAP_SIZE - 1.  % Ensure within bounds
+    X >= 1 andalso X < ?MAP_SIZE - 1 andalso Y >= 1 andalso Y < ?MAP_SIZE - 1.
 
 %% ===================================================================
-%% Graph Creation for Steiner Tree
+%% Power-up Selection Logic
+%% ===================================================================
+
+select_powerup_for_breakable() ->
+    RandNum = rand:uniform(25), % 1-25
+    select_powerup_by_number(RandNum, breakable).
+
+select_powerup_for_strong() ->
+    RandNum = rand:uniform(14), % 1-14 (guaranteed power-up)
+    select_powerup_by_number(RandNum, strong).
+
+select_powerup_by_number(Num, _TileType) ->
+    Config = ?POWERUP_CONFIG,
+    case find_powerup_by_number(Num, Config) of
+        {found, Powerup} -> Powerup;
+        not_found -> ?NO_POWERUP
+    end.
+
+find_powerup_by_number(_Num, []) -> not_found;
+find_powerup_by_number(Num, [{Powerup, Numbers, _Rarity} | Rest]) ->
+    case is_number_in_range(Num, Numbers) of
+        true -> {found, Powerup};
+        false -> find_powerup_by_number(Num, Rest)
+    end.
+
+is_number_in_range(Num, Num) when is_integer(Num) -> true; % Single number
+is_number_in_range(Num, Numbers) when is_list(Numbers) ->
+    lists:member(Num, Numbers);
+is_number_in_range(_, _) -> false.
+
+%% ===================================================================
+%% Enhanced Tile Setting with Power-ups and Statistics
+%% ===================================================================
+
+set_tile_with_powerup(MapState, X, Y, TileType) ->
+    Grid = MapState#map_state.grid,
+    PowerupGrid = MapState#map_state.powerup_grid,
+    Stats = MapState#map_state.statistics,
+    
+    % Determine power-up based on tile type
+    Powerup = case TileType of
+        ?BREAKABLE -> select_powerup_for_breakable();
+        ?STRONG -> select_powerup_for_strong();
+        _ -> ?NO_POWERUP
+    end,
+    
+    % Update grids
+    Row = array:get(X, Grid),
+    NewRow = array:set(Y, TileType, Row),
+    NewGrid = array:set(X, NewRow, Grid),
+    
+    PowerupRow = array:get(X, PowerupGrid),
+    NewPowerupRow = array:set(Y, Powerup, PowerupRow),
+    NewPowerupGrid = array:set(X, NewPowerupRow, PowerupGrid),
+    
+    % Update statistics
+    NewStats = update_statistics(Stats, TileType, Powerup, X, Y),
+    
+    MapState#map_state{
+        grid = NewGrid,
+        powerup_grid = NewPowerupGrid,
+        statistics = NewStats
+    }.
+
+update_statistics(Stats, TileType, Powerup, X, Y) ->
+    % Update tile counts
+    TileCounts = maps:get(tile_counts, Stats),
+    TileKey = tile_type_to_key(TileType),
+    NewTileCounts = maps:update_with(TileKey, fun(Count) -> Count + 1 end, 1, TileCounts),
+    
+    % Update power-up counts
+    PowerupCounts = maps:get(powerup_counts, Stats),
+    PowerupKey = powerup_to_key(Powerup),
+    NewPowerupCounts = maps:update_with(PowerupKey, fun(Count) -> Count + 1 end, 1, PowerupCounts),
+    
+    % Update power-up locations
+    PowerupLocations = maps:get(powerup_locations, Stats),
+    NewPowerupLocations = case Powerup of
+        ?NO_POWERUP -> PowerupLocations;
+        _ -> [{Powerup, X, Y, TileType} | PowerupLocations]
+    end,
+    
+    Stats#{
+        tile_counts => NewTileCounts,
+        powerup_counts => NewPowerupCounts,
+        powerup_locations => NewPowerupLocations
+    }.
+
+tile_type_to_key(?FREE) -> free;
+tile_type_to_key(?BREAKABLE) -> breakable;
+tile_type_to_key(?UNBREAKABLE) -> unbreakable;
+tile_type_to_key(?STRONG) -> strong;
+tile_type_to_key(?PLAYER_START) -> player_start.
+
+powerup_to_key(?NO_POWERUP) -> none;
+powerup_to_key(?MOVE_SPEED) -> move_speed;
+powerup_to_key(?REMOTE_IGNITION) -> remote_ignition;
+powerup_to_key(?REPEAT_BOMBS) -> repeat_bombs;
+powerup_to_key(?KICK_BOMB) -> kick_bomb;
+powerup_to_key(?PHASED) -> phased;
+powerup_to_key(?PLUS_BOMBS) -> plus_bombs;
+powerup_to_key(?BIGGER_EXPLOSION) -> bigger_explosion;
+powerup_to_key(?PLUS_LIFE) -> plus_life;
+powerup_to_key(?FREEZE_BOMB) -> freeze_bomb.
+
+%% ===================================================================
+%% Graph Creation for Steiner Tree (unchanged)
 %% ===================================================================
 
 create_game_graph() ->
@@ -145,10 +302,10 @@ create_game_graph() ->
         || {X, Y} <- Nodes
     ]),
     
-    #{nodes => Nodes, edges => Edges}.  % Create graph structure
+    #{nodes => Nodes, edges => Edges}.
 
 %% ===================================================================
-%% Terminal Selection
+%% Terminal Selection (unchanged)
 %% ===================================================================
 
 select_terminals(NumRandom) ->
@@ -157,16 +314,16 @@ select_terminals(NumRandom) ->
     % Add random terminals
     RandomTerminals = select_random_terminals(NumRandom, Corners, []),
     
-    Corners ++ RandomTerminals. % Combine corners with random terminals
+    Corners ++ RandomTerminals.
 
-select_random_terminals(0, _Existing, Acc) -> Acc;  % Base case: no more terminals to select
+select_random_terminals(0, _Existing, Acc) -> Acc;
 select_random_terminals(N, Existing, Acc) ->
     X = rand:uniform(?MAP_SIZE - 6) + 2, % Range 3 to MAP_SIZE-4
     Y = rand:uniform(?MAP_SIZE - 6) + 2,    
     
     case is_valid_terminal({X, Y}, Existing ++ Acc) of
-        true -> select_random_terminals(N - 1, Existing, [{X, Y} | Acc]);   % Valid terminal found
-        false -> select_random_terminals(N, Existing, Acc) % Try again
+        true -> select_random_terminals(N - 1, Existing, [{X, Y} | Acc]);
+        false -> select_random_terminals(N, Existing, Acc)
     end.
 
 is_valid_terminal({X, Y}, ExistingTerminals) ->
@@ -176,7 +333,7 @@ is_valid_terminal({X, Y}, ExistingTerminals) ->
     end, ExistingTerminals).
 
 %% ===================================================================
-%% Simplified Steiner Tree Generation
+%% Simplified Steiner Tree Generation (unchanged)
 %% ===================================================================
 
 generate_steiner_tree(Graph, Terminals) ->
@@ -194,10 +351,10 @@ generate_steiner_tree(Graph, Terminals) ->
 
 calculate_terminal_distances(Terminals) ->
     [{{T1, T2}, manhattan_distance(T1, T2)} || 
-     T1 <- Terminals, T2 <- Terminals, T1 < T2].    % Calculate pairwise distances
+     T1 <- Terminals, T2 <- Terminals, T1 < T2].
 
 manhattan_distance({X1, Y1}, {X2, Y2}) ->
-    abs(X1 - X2) + abs(Y1 - Y2).    % Calculate Manhattan distance
+    abs(X1 - X2) + abs(Y1 - Y2).
 
 minimum_spanning_tree(Terminals, Distances) ->
     % Kruskal algorithm for MST
@@ -213,23 +370,21 @@ initialize_union_find(Terminals) ->
 
 select_mst_edges([], _UF, Acc) -> Acc;
 select_mst_edges([{{T1, T2}, _} | Rest], UF, Acc) ->
-    Root1 = find_root(T1, UF),  % Find root of T1
-    Root2 = find_root(T2, UF),  % Find root of T2
+    Root1 = find_root(T1, UF),
+    Root2 = find_root(T2, UF),
     
     case Root1 =:= Root2 of
         true -> 
-            % Creates cycle, skip this edge
             select_mst_edges(Rest, UF, Acc);
         false ->
-            % Add edge and union the sets
             NewUF = maps:put(Root1, Root2, UF),
             select_mst_edges(Rest, NewUF, [{T1, T2} | Acc])
     end.
 
 find_root(Node, UF) ->
     case maps:get(Node, UF) of
-        Node -> Node;   % Node is its own root
-        Parent -> find_root(Parent, UF) % Path compression
+        Node -> Node;
+        Parent -> find_root(Parent, UF)
     end.
 
 shortest_path({X1, Y1}, {X2, Y2}) ->
@@ -246,19 +401,17 @@ shortest_path({X1, Y1}, {X2, Y2}) ->
         true -> []
     end,
     
-    lists:usort(XPath ++ YPath).    % Combine paths
+    lists:usort(XPath ++ YPath).
 
 extract_steiner_paths(SteinerEdges) ->
-    lists:usort(lists:flatten(SteinerEdges)).   % Extract unique positions from edges
+    lists:usort(lists:flatten(SteinerEdges)).
 
 %% ===================================================================
-%% Apply Steiner Tree to Map
+%% Apply Steiner Tree to Map (Enhanced with Power-ups)
 %% ===================================================================
 
 apply_steiner_tree(MapState, SteinerPaths, BreakableChance) ->
-    Grid = MapState#map_state.grid, % Initialize grid
-    
-    NewGrid = lists:foldl(fun({X, Y}, AccGrid) ->
+    lists:foldl(fun({X, Y}, AccMapState) ->
         case is_valid_position(X, Y) andalso not is_in_player_area(X, Y) of
             true ->
                 % Steiner paths can be FREE or BREAKABLE
@@ -266,28 +419,23 @@ apply_steiner_tree(MapState, SteinerPaths, BreakableChance) ->
                     true -> ?BREAKABLE;
                     false -> ?FREE
                 end,
-                Row = array:get(X, AccGrid),   
-                NewRow = array:set(Y, TileType, Row),
-                array:set(X, NewRow, AccGrid);  % Update grid
+                set_tile_with_powerup(AccMapState, X, Y, TileType);
             false ->
-                AccGrid % Invalid position, keep original grid
+                AccMapState
         end
-    end, Grid, SteinerPaths),
-    
-    MapState#map_state{grid = NewGrid, steiner_paths = SteinerPaths}.   % Update map state
+    end, MapState#map_state{steiner_paths = SteinerPaths}, SteinerPaths).
 
 is_in_player_area(X, Y) ->
     Corners = [{1, 1}, {1, 14}, {14, 1}, {14, 14}],
     lists:any(fun({CX, CY}) ->
         abs(X - CX) =< 1 andalso abs(Y - CY) =< 1
-    end, Corners).  % Check if in player start area
+    end, Corners).
 
 %% ===================================================================
-%% Fill Remaining Areas
+%% Fill Remaining Areas (Enhanced with Power-ups)
 %% ===================================================================
 
 fill_remaining_areas(MapState, Options) ->
-    Grid = MapState#map_state.grid,
     SteinerPaths = MapState#map_state.steiner_paths,    
     
     BreakableProb = maps:get(breakable_prob, Options),
@@ -298,14 +446,10 @@ fill_remaining_areas(MapState, Options) ->
     AvailablePositions = get_available_positions(SteinerPaths),
     
     % Fill with random tile types
-    NewGrid = lists:foldl(fun({X, Y}, AccGrid) ->
+    lists:foldl(fun({X, Y}, AccMapState) ->
         TileType = select_random_tile_type(BreakableProb, StrongProb, UnbreakableProb),
-        Row = array:get(X, AccGrid),
-        NewRow = array:set(Y, TileType, Row),
-        array:set(X, NewRow, AccGrid)
-    end, Grid, AvailablePositions),
-    
-    MapState#map_state{grid = NewGrid}.
+        set_tile_with_powerup(AccMapState, X, Y, TileType)
+    end, MapState, AvailablePositions).
 
 get_available_positions(SteinerPaths) ->
     AllPositions = [{X, Y} || X <- lists:seq(1, ?MAP_SIZE - 2), 
@@ -327,23 +471,56 @@ select_random_tile_type(BreakableProb, StrongProb, UnbreakableProb) ->
     end.
 
 %% ===================================================================
-%% Mark Player Starts
+%% Mark Player Starts (Enhanced with Statistics)
 %% ===================================================================
 
 mark_player_starts(MapState) ->
-    Grid = MapState#map_state.grid,
     Corners = [{1, 1}, {1, 14}, {14, 1}, {14, 14}],
     
-    NewGrid = lists:foldl(fun({X, Y}, AccGrid) ->
-        Row = array:get(X, AccGrid),
-        NewRow = array:set(Y, ?PLAYER_START, Row),
-        array:set(X, NewRow, AccGrid)
-    end, Grid, Corners),
-    
-    MapState#map_state{grid = NewGrid}.
+    lists:foldl(fun({X, Y}, AccMapState) ->
+        set_tile_with_powerup(AccMapState, X, Y, ?PLAYER_START)
+    end, MapState, Corners).
 
 %% ===================================================================
-%% Utility Functions
+%% Statistics Display
+%% ===================================================================
+
+print_statistics(MapState) ->
+    Stats = MapState#map_state.statistics,
+    TileCounts = maps:get(tile_counts, Stats),
+    PowerupCounts = maps:get(powerup_counts, Stats),
+    PowerupLocations = maps:get(powerup_locations, Stats),
+    
+    io:format("~n📊 MAP GENERATION STATISTICS~n"),
+    io:format("============================~n"),
+    
+    % Tile counts
+    io:format("🧱 TILE COUNTS:~n"),
+    maps:foreach(fun(TileType, Count) ->
+        io:format("  ~15s: ~3w~n", [atom_to_list(TileType), Count])
+    end, TileCounts),
+    
+    io:format("~n💎 POWER-UP COUNTS:~n"),
+    maps:foreach(fun(PowerupType, Count) ->
+        io:format("  ~15s: ~3w~n", [atom_to_list(PowerupType), Count])
+    end, PowerupCounts),
+    
+    io:format("~n📍 POWER-UP LOCATIONS:~n"),
+    SortedLocations = lists:sort(PowerupLocations),
+    lists:foreach(fun({Powerup, X, Y, TileType}) ->
+        TileStr = case TileType of
+            ?BREAKABLE -> "BREAKABLE";
+            ?STRONG -> "STRONG";
+            _ -> "OTHER"
+        end,
+        io:format("  ~15s at (~2w,~2w) in ~s tile~n", 
+                 [atom_to_list(Powerup), X, Y, TileStr])
+    end, SortedLocations),
+    
+    io:format("~n").
+
+%% ===================================================================
+%% Utility Functions (Enhanced)
 %% ===================================================================
 
 %% Get the tile type at specific coordinates
@@ -356,7 +533,17 @@ get_tile_at(Grid, X, Y) ->
             ?UNBREAKABLE % Out of bounds
     end.
 
-%% Visualize the map in console for debugging
+%% Get the power-up at specific coordinates
+get_powerup_at(PowerupGrid, X, Y) ->
+    case X >= 0 andalso X < ?MAP_SIZE andalso Y >= 0 andalso Y < ?MAP_SIZE of
+        true ->
+            Row = array:get(X, PowerupGrid),
+            array:get(Y, Row);
+        false ->
+            ?NO_POWERUP % Out of bounds
+    end.
+
+%% Enhanced visualization with power-ups
 visualize_map(Grid) ->
     io:format("~n🗺️  Generated Map (~wx~w):~n", [?MAP_SIZE, ?MAP_SIZE]),
     io:format("   "),
@@ -383,13 +570,13 @@ visualize_map(Grid) ->
     io:format("~nLegend: . = Free, * = Breakable, # = Unbreakable, + = Strong, P = Player~n").
 
 %% ===================================================================
-%% Export Map to Erlang Module
+%% Export Map to Erlang Module (Enhanced)
 %% ===================================================================
 export_map(Grid, Filename) ->
     {ok, File} = file:open(Filename, [write]),
     
     % Write header
-    io:format(File, "%% Generated 16x16 Bomberman Map~n", []),
+    io:format(File, "%% Generated 16x16 Bomberman Map with Power-ups~n", []),
     io:format(File, "-module(~s).~n", [filename:basename(Filename, ".erl")]),
     io:format(File, "-export([get_map/0, get_tile_type/2, get_player_starts/0]).~n~n", []),
     
@@ -424,22 +611,11 @@ export_map(Grid, Filename) ->
     io:format("📄 Map exported to ~s~n", [Filename]).
 
 %% ===================================================================
-%% Usage Examples
+%% Test Functions
 %% ===================================================================
 
-%% Simple usage:
-%% 1> Grid = map_generator:generate_map().
-%% 2> map_generator:visualize_map(Grid).
-%% 3> map_generator:export_map(Grid, "my_map.erl").
-
-%% With custom options:
-%% 1> Options = #{steiner_breakable_chance => 0.5, breakable_prob => 0.4}.
-%% 2> Grid = map_generator:generate_map(Options).
-%% 3> TileType = map_generator:get_tile_at(Grid, 5, 5).
-
-%% Test map generation:
 test_generation() ->
-    io:format("🧪 Testing map generation...~n"),
+    io:format("🧪 Testing map generation with power-ups...~n"),
     
     % Generate map
     Grid = generate_map(),
