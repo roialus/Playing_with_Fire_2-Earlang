@@ -31,9 +31,9 @@ generate_map(Options) ->
     % Default options for map tiles
     DefaultOptions = #{
         steiner_breakable_chance => 0.3,
-        breakable_prob => 0.3,
+        breakable_prob => 0.4,
         strong_prob => 0.15,
-        unbreakable_prob => 0.25,
+        unbreakable_prob => 0.15,
         num_random_terminals => 2
     },
     Opts = maps:merge(DefaultOptions, Options),
@@ -320,9 +320,9 @@ select_random_tile_type(BreakableProb, StrongProb, UnbreakableProb) ->
     Rand = rand:uniform(),
     
     if 
-        Rand =< BreakableProb -> ?BREAKABLE;
-        Rand =< BreakableProb + StrongProb -> ?STRONG;
-        Rand =< BreakableProb + StrongProb + UnbreakableProb -> ?UNBREAKABLE;
+        Rand =< UnbreakableProb -> ?UNBREAKABLE;
+        Rand =< UnbreakableProb + StrongProb -> ?STRONG;
+        Rand =< BreakableProb + StrongProb + UnbreakableProb -> ?BREAKABLE;
         true -> ?FREE
     end.
 
