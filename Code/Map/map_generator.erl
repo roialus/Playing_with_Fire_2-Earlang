@@ -1,7 +1,7 @@
 -module(map_generator).
 
--export([generate_map/0, generate_map/1, visualize_map/1, 
-         get_tile_at/3, export_map/2, test_generation/0]).
+-export([generate_map/0, generate_map/1, generate_map_with_powerups/0, generate_map_with_powerups/1,
+         visualize_map/1, get_tile_at/3, export_map/2, export_map_with_powerups/2, test_generation/0]).
 
 %% Tile type definitions
 -define(FREE, 0).         % Free spot (no tile) - walkable
@@ -101,6 +101,57 @@ generate_map(Options) ->
     % For debugging
     io:format("✅ Map generation complete!~n"),
     FinalMapState#map_state.grid.
+
+%% Generate map and return full map state (including power-ups)
+generate_map_with_powerups() ->
+    generate_map_with_powerups(#{}).
+
+generate_map_with_powerups(Options) ->
+    % Same as generate_map but returns full MapState
+    DefaultOptions = #{
+        steiner_breakable_chance => 0.3,
+        breakable_prob => 0.4,
+        strong_prob => 0.15,
+        unbreakable_prob => 0.15,
+        num_random_terminals => 2
+    },
+    Opts = maps:merge(DefaultOptions, Options),
+    
+    % For debugging
+    io:format("🗺️  Generating ~wx~w Erlang Map with Power-ups...~n", [?MAP_SIZE, ?MAP_SIZE]),
+    
+    % Step 1: Initialize empty map
+    MapState = initialize_map(),
+    
+    % Step 2: Create graph for Steiner tree
+    Graph = create_game_graph(),
+    
+    % Step 3: Select terminals (corners + random)
+    Terminals = select_terminals(maps:get(num_random_terminals, Opts)),
+    % For debugging
+    io:format("📍 Terminals: ~p~n", [Terminals]),
+    
+    % Step 4: Generate Steiner tree (simplified MST approach)
+    SteinerEdges = generate_steiner_tree(Graph, Terminals),
+    SteinerPaths = extract_steiner_paths(SteinerEdges),
+    % For debugging
+    io:format("🌲 Steiner tree: ~w positions~n", [length(SteinerPaths)]),
+    
+    % Step 5: Apply Steiner tree to map
+    MapState2 = apply_steiner_tree(MapState, SteinerPaths, maps:get(steiner_breakable_chance, Opts)),
+    
+    % Step 6: Fill remaining areas
+    MapState3 = fill_remaining_areas(MapState2, Opts),
+    
+    % Step 7: Mark player starts
+    FinalMapState = mark_player_starts(MapState3),
+    
+    % Step 8: Print statistics
+    print_statistics(FinalMapState),
+    
+    % For debugging
+    io:format("✅ Map generation complete!~n"),
+    FinalMapState.
 
 %% ===================================================================
 %% Map Initialization
@@ -610,6 +661,91 @@ export_map(Grid, Filename) ->
     file:close(File),
     io:format("📄 Map exported to ~s~n", [Filename]).
 
+%% Enhanced export with power-up information
+export_map_with_powerups(MapState, Filename) ->
+    {ok, File} = file:open(Filename, [write]),
+    
+    Grid = MapState#map_state.grid,
+    PowerupGrid = MapState#map_state.powerup_grid,
+    
+    % Write header
+    io:format(File, "%% Generated 16x16 Bomberman Map with Power-ups~n", []),
+    io:format(File, "-module(~s).~n", [filename:basename(Filename, ".erl")]),
+    io:format(File, "-export([get_map/0, get_powerup_map/0, get_tile_type/2, get_powerup_at/2, get_player_starts/0]).~n~n", []),
+    
+    % Write tile definitions
+    io:format(File, "-define(FREE, 0).~n", []),
+    io:format(File, "-define(BREAKABLE, 1).~n", []),
+    io:format(File, "-define(UNBREAKABLE, 2).~n", []),
+    io:format(File, "-define(STRONG, 3).~n", []),
+    io:format(File, "-define(PLAYER_START, 4).~n~n", []),
+    
+    % Write power-up definitions
+    io:format(File, "-define(NO_POWERUP, none).~n", []),
+    io:format(File, "-define(MOVE_SPEED, move_speed).~n", []),
+    io:format(File, "-define(REMOTE_IGNITION, remote_ignition).~n", []),
+    io:format(File, "-define(REPEAT_BOMBS, repeat_bombs).~n", []),
+    io:format(File, "-define(KICK_BOMB, kick_bomb).~n", []),
+    io:format(File, "-define(PHASED, phased).~n", []),
+    io:format(File, "-define(PLUS_BOMBS, plus_bombs).~n", []),
+    io:format(File, "-define(BIGGER_EXPLOSION, bigger_explosion).~n", []),
+    io:format(File, "-define(PLUS_LIFE, plus_life).~n", []),
+    io:format(File, "-define(FREEZE_BOMB, freeze_bomb).~n~n", []),
+    
+    % Write map data
+    io:format(File, "get_map() ->~n    [~n", []),
+    lists:foreach(fun(X) ->
+        Row = array:get(X, Grid),
+        RowList = [array:get(Y, Row) || Y <- lists:seq(0, ?MAP_SIZE - 1)],
+        RowStr = string:join([integer_to_list(T) || T <- RowList], ", "),
+        Comma = if X < ?MAP_SIZE - 1 -> ","; true -> "" end,
+        io:format(File, "        [~s]~s~n", [RowStr, Comma])
+    end, lists:seq(0, ?MAP_SIZE - 1)),
+    io:format(File, "    ].~n~n", []),
+    
+    % Write power-up map data
+    io:format(File, "get_powerup_map() ->~n    [~n", []),
+    lists:foreach(fun(X) ->
+        Row = array:get(X, PowerupGrid),
+        RowList = [array:get(Y, Row) || Y <- lists:seq(0, ?MAP_SIZE - 1)],
+        RowStr = string:join([format_powerup_for_export(P) || P <- RowList], ", "),
+        Comma = if X < ?MAP_SIZE - 1 -> ","; true -> "" end,
+        io:format(File, "        [~s]~s~n", [RowStr, Comma])
+    end, lists:seq(0, ?MAP_SIZE - 1)),
+    io:format(File, "    ].~n~n", []),
+    
+    % Write helper functions
+    io:format(File, "get_tile_type(X, Y) when X >= 0, X < 16, Y >= 0, Y < 16 ->~n", []),
+    io:format(File, "    Map = get_map(),~n", []),
+    io:format(File, "    Row = lists:nth(X + 1, Map),~n", []),
+    io:format(File, "    lists:nth(Y + 1, Row).~n~n", []),
+    
+    io:format(File, "get_powerup_at(X, Y) when X >= 0, X < 16, Y >= 0, Y < 16 ->~n", []),
+    io:format(File, "    PowerupMap = get_powerup_map(),~n", []),
+    io:format(File, "    Row = lists:nth(X + 1, PowerupMap),~n", []),
+    io:format(File, "    lists:nth(Y + 1, Row).~n~n", []),
+    
+    io:format(File, "get_player_starts() ->~n", []),
+    io:format(File, "    [{player_1, 1, 1}, {player_2, 1, 14}, {player_3, 14, 1}, {player_4, 14, 14}].~n", []),
+    
+    file:close(File),
+    io:format("📄 Map with power-ups exported to ~s~n", [Filename]).
+
+%% Helper function to format power-ups for export
+format_powerup_for_export(Powerup) ->
+    case Powerup of
+        ?NO_POWERUP -> "none";
+        ?MOVE_SPEED -> "move_speed";
+        ?REMOTE_IGNITION -> "remote_ignition";
+        ?REPEAT_BOMBS -> "repeat_bombs";
+        ?KICK_BOMB -> "kick_bomb";
+        ?PHASED -> "phased";
+        ?PLUS_BOMBS -> "plus_bombs";
+        ?BIGGER_EXPLOSION -> "bigger_explosion";
+        ?PLUS_LIFE -> "plus_life";
+        ?FREEZE_BOMB -> "freeze_bomb"
+    end.
+
 %% ===================================================================
 %% Test Functions
 %% ===================================================================
@@ -617,8 +753,9 @@ export_map(Grid, Filename) ->
 test_generation() ->
     io:format("🧪 Testing map generation with power-ups...~n"),
     
-    % Generate map
-    Grid = generate_map(),
+    % Generate map with full state
+    MapState = generate_map_with_powerups(),
+    Grid = MapState#map_state.grid,
     
     % Test basic properties
     BorderTile = get_tile_at(Grid, 0, 0),
@@ -632,8 +769,9 @@ test_generation() ->
     % Visualize
     visualize_map(Grid),
     
-    % Export for testing
-    export_map(Grid, "test_map.erl"),
+    % Export both versions for testing
+    export_map(Grid, "test_map_basic.erl"),
+    export_map_with_powerups(MapState, "test_map_with_powerups.erl"),
     
     io:format("✅ Test complete!~n"),
     Grid.
