@@ -45,8 +45,8 @@
 %% @doc Spawns the server and registers the local name (unique)
 -spec(start_link(Pos_x::integer, Pos_y::integer,
     Type:: 'regular'|'remote'|'repeating',
-    Time_created:: time(), %todo: ??
-    Optional:: list()) -> % todo: ?? 
+    Time_created:: time(),
+    Optional:: list()) ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 
 start_link(Pos_x, Pos_y, Type, Time_created, Optional) ->
@@ -60,10 +60,10 @@ start_link(Pos_x, Pos_y, Type, Time_created, Optional) ->
 %% @doc Initializes the server
 
 -spec(init(Args :: term()) ->
-    {ok, State :: #tile_state{}} | {ok, State :: #tile_state{}, timeout() | hibernate} |
+    {ok, State :: #bomb_state{}} | {ok, State :: #bomb_state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
 
-init([Position, Type, Time_created, Node_ID, GN_Pid [] ]) -> % no optional data (no owner)
+init([Position, Type, Time_created, Node_ID, GN_Pid, [] ]) -> % no optional data (no owner)
     State = case Type of 
         remote ->
             #bomb_state{position=Position, type=Type, ignited=false, time_placed=Time_created, original_node_ID=Node_ID, gn_pid=GN_Pid};
@@ -86,13 +86,13 @@ init([Position, Type, Time_created, Node_ID, [Owner_ID, Radius]]) -> % with opti
 %% @private
 %% @doc Handling call messages
 -spec(handle_call(Request :: term(), From :: {pid(), Tag :: term()},
-    State :: #tile_state{}) ->
-    {reply, Reply :: term(), NewState :: #tile_state{}} |
-    {reply, Reply :: term(), NewState :: #tile_state{}, timeout() | hibernate} |
-    {noreply, NewState :: #tile_state{}} |
-    {noreply, NewState :: #tile_state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), Reply :: term(), NewState :: #tile_state{}} |
-    {stop, Reason :: term(), NewState :: #tile_state{}}).
+    State :: #bomb_state{}) ->
+    {reply, Reply :: term(), NewState :: #bomb_state{}} |
+    {reply, Reply :: term(), NewState :: #bomb_state{}, timeout() | hibernate} |
+    {noreply, NewState :: #bomb_state{}} |
+    {noreply, NewState :: #bomb_state{}, timeout() | hibernate} |
+    {stop, Reason :: term(), Reply :: term(), NewState :: #bomb_state{}} |
+    {stop, Reason :: term(), NewState :: #bomb_state{}}).
 
 
 handle_call(Request, _From, State = #bomb_state{}) ->
@@ -110,7 +110,7 @@ handle_call(Request, _From, State = #bomb_state{}) ->
                         {reply, ignited, New_state}
                 end;
             true -> % bomb type = regular/repeating - nothing to ignite
-                {reply, not_remote, State};
+                {reply, not_remote, State}
             end;
             
         hit_by_explosion -> % another bomb exploded and the explosion reached this bomb
@@ -127,7 +127,7 @@ handle_call(Request, _From, State = #bomb_state{}) ->
                         true -> ok;
                         false -> 
                             receive
-                                exploded -> ok;
+                                exploded -> ok
                             after 0 -> ok
                             end
                     end,
@@ -143,7 +143,7 @@ handle_call(Request, _From, State = #bomb_state{}) ->
                                 true -> ok;
                                 false -> 
                                     receive
-                                        exploded -> ok;
+                                        exploded -> ok
                                     after 0 -> ok
                                     end
                             end,
@@ -151,9 +151,9 @@ handle_call(Request, _From, State = #bomb_state{}) ->
                             New_state = State#bomb_state{status=frozen, ignited=New_timer_ref},
                             {reply, frozen_ignited, New_state}
                     end;
-                {_Type,_Ignited} -> % catch-all for erorrs
-                    {stop, {unexpcted_call, Type, Ignited}, State};
-
+                {Type,Ignited} -> % catch-all for errors
+                    {stop, {unexpcted_call, Type, Ignited}, State}
+            end;
         {kick, Direction} -> % a player 'hit' the bomb with the proper buff, Direction is the movement direction of the player @ moment of hitting
         %% UNLIKE player process dynamics, the bomb is cleared to move in this direction to the next position
         %% when it reaches the next tile it asks for permissions to move to the next one, and so on.
@@ -179,22 +179,22 @@ handle_call(Request, _From, State = #bomb_state{}) ->
 
 %% @private
 %% @doc Handling cast messages - async. messaging
--spec(handle_cast(Request :: term(), State :: #tile_state{}) ->
-    {noreply, NewState :: #tile_state{}} |
-    {noreply, NewState :: #tile_state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: #tile_state{}}).
+-spec(handle_cast(Request :: term(), State :: #bomb_state{}) ->
+    {noreply, NewState :: #bomb_state{}} |
+    {noreply, NewState :: #bomb_state{}, timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: #bomb_state{}}).
 
-handle_cast(_Request, State = #tile_state{}) ->
+handle_cast(_Request, State = #bomb_state{}) ->
     {noreply, State}.
 
 %% ----------------------------------------------------------------------
 
 %% @private
 %% @doc Handling all non call/cast messages
--spec(handle_info(Info :: timeout() | term(), State :: #tile_state{}) ->
-    {noreply, NewState :: #tile_state{}} |
-    {noreply, NewState :: #tile_state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: #tile_state{}}).
+-spec(handle_info(Info :: timeout() | term(), State :: #bomb_state{}) ->
+    {noreply, NewState :: #bomb_state{}} |
+    {noreply, NewState :: #bomb_state{}, timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: #bomb_state{}}).
 
 handle_info(Info, State = #bomb_state{}) ->
     case Info of
@@ -209,8 +209,8 @@ handle_info(Info, State = #bomb_state{}) ->
 
         req_further_move -> % reached middle of next tile, ask GN for permission to keep going
             Next_pos = lists:zipwith(fun(X,Y) -> X+Y end, State#bomb_state.position, State#bomb_state.movement),
-            erlang:send(State#bomb_state.gn_pid, {req_move, NewPos, self()}),
-            {noreply, New_state};
+            erlang:send(State#bomb_state.gn_pid, {req_move, Next_pos, self()}),
+            {noreply, State};
 
         hit_by_explosion -> % hit by another bomb's explosions
             if
@@ -239,18 +239,18 @@ handle_info(Info, State = #bomb_state{}) ->
 %% necessary cleaning up. When it returns, the gen_server terminates
 %% with Reason. The return value is ignored.
 -spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
-    State :: #tile_state{}) -> term()).
+    State :: #bomb_state{}) -> term()).
 
-terminate(_Reason, _State = #tile_state{}) -> ok.
+terminate(_Reason, _State = #bomb_state{}) -> ok.
 
 
 %% @private
 %% @doc Convert process state when code is changed
--spec(code_change(OldVsn :: term() | {down, term()}, State :: #tile_state{},
+-spec(code_change(OldVsn :: term() | {down, term()}, State :: #bomb_state{},
     Extra :: term()) ->
-    {ok, NewState :: #tile_state{}} | {error, Reason :: term()}).
+    {ok, NewState :: #bomb_state{}} | {error, Reason :: term()}).
 
-code_change(_OldVsn, State = #tile_state{}, _Extra) ->
+code_change(_OldVsn, State = #bomb_state{}, _Extra) ->
     {ok, State}.
 
 
