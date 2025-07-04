@@ -80,7 +80,7 @@ COLORS = {
 class EnhancedMapVisualizer:
     def __init__(self):
         self.screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
-        pygame.display.set_caption("🎮 Enhanced Bomberman Map - Professional 2D Graphics")
+        pygame.display.set_caption("🎮 Playing with Fire 2 Map")
         self.clock = pygame.time.Clock()
 
         # Enhanced fonts
@@ -102,7 +102,7 @@ class EnhancedMapVisualizer:
         self.map_surface = pygame.Surface((MAP_SIZE * TILE_SIZE, MAP_SIZE * TILE_SIZE))
 
     def load_test_data(self):
-        """Load enhanced map data"""
+        """Load map data"""
         tiles = [
             [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
             [2, 4, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 2],
@@ -167,7 +167,7 @@ class EnhancedMapVisualizer:
         }
 
     def draw_gradient_rect(self, surface, color1, color2, rect, vertical=True):
-        """Draw a smooth gradient rectangle"""
+        """Smooth gradient rectangle"""
         if vertical:
             for y in range(rect.height):
                 ratio = y / rect.height
@@ -186,7 +186,7 @@ class EnhancedMapVisualizer:
                                  (rect.x + x, rect.y), (rect.x + x, rect.y + rect.height))
 
     def draw_enhanced_shadow(self, surface, x, y, width, height, intensity=60):
-        """Draw realistic drop shadow"""
+        """Drop shadow"""
         shadow_surface = pygame.Surface((width + 8, height + 8), pygame.SRCALPHA)
         for i in range(4):
             alpha = intensity - i * 15
@@ -196,7 +196,7 @@ class EnhancedMapVisualizer:
         surface.blit(shadow_surface, (x - 2, y - 2))
 
     def draw_enhanced_floor(self, surface, x, y):
-        """Draw beautiful gradient floor tile"""
+        """Floor tile"""
         rect = pygame.Rect(x, y, TILE_SIZE, TILE_SIZE)
 
         # Base gradient
@@ -213,7 +213,7 @@ class EnhancedMapVisualizer:
         pygame.draw.rect(surface, COLORS['FLOOR_SHADOW'], rect, 1)
 
     def draw_enhanced_brick_wall(self, surface, x, y):
-        """Draw professional brick wall with depth"""
+        """Brick wall with depth"""
         # Drop shadow
         self.draw_enhanced_shadow(surface, x, y, TILE_SIZE, TILE_SIZE, 80)
 
@@ -243,7 +243,7 @@ class EnhancedMapVisualizer:
         pygame.draw.line(surface, COLORS['BRICK_TOP'], (x, y), (x, y + TILE_SIZE), 2)
 
     def draw_enhanced_wooden_barrel(self, surface, x, y, has_powerup=False):
-        """Draw beautiful wooden barrel with realistic shading"""
+        """Wooden barrel with realistic shading"""
         # Drop shadow
         self.draw_enhanced_shadow(surface, x, y, TILE_SIZE, TILE_SIZE, 70)
 
@@ -299,7 +299,7 @@ class EnhancedMapVisualizer:
             self.draw_powerup_glow(surface, center_x, center_y)
 
     def draw_enhanced_metal_barrel(self, surface, x, y, has_powerup=False):
-        """Draw shiny metal barrel with reflections"""
+        """Shiny metal barrel with reflections"""
         # Drop shadow
         self.draw_enhanced_shadow(surface, x, y, TILE_SIZE, TILE_SIZE, 70)
 
@@ -346,7 +346,7 @@ class EnhancedMapVisualizer:
             self.draw_powerup_glow(surface, center_x, center_y)
 
     def draw_powerup_glow(self, surface, center_x, center_y):
-        """Draw beautiful power-up glow effect"""
+        """Power-up glow effect"""
         glow_intensity = 0.7 + 0.3 * math.sin(self.powerup_pulse * 4)
         glow_size = int(20 + 8 * math.sin(self.powerup_pulse * 3))
 
@@ -360,7 +360,7 @@ class EnhancedMapVisualizer:
                 surface.blit(glow_surf, (center_x - radius, center_y - radius))
 
     def draw_enhanced_player(self, surface, x, y, player_num):
-        """Draw beautiful animated player character"""
+        """Animated player character"""
         center_x = x + TILE_SIZE // 2
         center_y = y + TILE_SIZE // 2
 
@@ -461,7 +461,7 @@ class EnhancedMapVisualizer:
         surface.blit(badge_surf, (center_x - 8, char_y + 22))
 
     def draw_custom_icon(self, surface, icon_type, center_x, center_y, size, color):
-        """Draw custom icons instead of emoji"""
+        """Icons for power-ups"""
         if icon_type == "lightning":
             # Lightning bolt
             points = [
@@ -560,14 +560,14 @@ class EnhancedMapVisualizer:
                              (center_x + size // 3, center_y - size // 3), 3)
 
     def draw_enhanced_map(self):
-        """Draw the complete enhanced map"""
+        """Complete map"""
         self.map_surface.fill(COLORS['BACKGROUND'])
 
         # Update animations
         self.time += 1 / FPS
         self.powerup_pulse += 1 / FPS
 
-        # Draw tiles with enhanced graphics
+        # Draw tiles
         for x in range(MAP_SIZE):
             for y in range(MAP_SIZE):
                 pixel_x = y * TILE_SIZE
@@ -577,11 +577,11 @@ class EnhancedMapVisualizer:
                 powerup = self.map_data['powerups'][x][y]
                 has_powerup = powerup != "none"
 
-                # Always draw enhanced floor first
+                #  Draw floor 
                 if tile_type != 2:
                     self.draw_enhanced_floor(self.map_surface, pixel_x, pixel_y)
 
-                # Draw enhanced objects
+                # Draw objects
                 if tile_type == 1:  # BREAKABLE
                     self.draw_enhanced_wooden_barrel(self.map_surface, pixel_x, pixel_y, has_powerup)
                 elif tile_type == 2:  # UNBREAKABLE
@@ -623,7 +623,7 @@ class EnhancedMapVisualizer:
         title_main = self.title_font.render(title_text, True, title_color)
         self.screen.blit(title_main, (MAP_SIZE * TILE_SIZE + 20, title_y))
 
-        # Power-ups with cool names and custom drawn icons
+        # Power-ups 
         start_y = 100
         powerup_data = [
             ("lightning", "LIGHTNING SPEED", "move_speed", COLORS['TEXT_CYAN']),
@@ -641,7 +641,7 @@ class EnhancedMapVisualizer:
             y_pos = start_y + i * 55
 
             if y_pos < WINDOW_HEIGHT - 60:
-                # Animated background for each power-up
+                # Animated background for power-up
                 bg_alpha = int(30 + 20 * math.sin(self.time * 2 + i * 0.5))
                 bg_surf = pygame.Surface((260, 45), pygame.SRCALPHA)
 
@@ -649,7 +649,7 @@ class EnhancedMapVisualizer:
                 bg_color1 = (*color[:3], bg_alpha) if len(color) >= 3 else (*color, bg_alpha)
                 bg_color2 = (max(0, color[0] - 50), max(0, color[1] - 50), max(0, color[2] - 50), bg_alpha // 2)
 
-                # Create gradient effect manually
+                # Create gradient effect
                 for y in range(45):
                     ratio = y / 45
                     r = int(bg_color1[0] * (1 - ratio) + bg_color2[0] * ratio)
@@ -660,11 +660,11 @@ class EnhancedMapVisualizer:
 
                 self.screen.blit(bg_surf, (MAP_SIZE * TILE_SIZE + 15, y_pos - 5))
 
-                # Animated icon with scaling
+                # Animated icon
                 icon_scale = 1.0 + 0.1 * math.sin(self.time * 4 + i)
                 icon_size = int(20 * icon_scale)
 
-                # Draw custom icon with glow
+                # Draw icon with glow
                 icon_surf = pygame.Surface((40, 40), pygame.SRCALPHA)
 
                 # Icon glow effect
@@ -676,12 +676,12 @@ class EnhancedMapVisualizer:
                         pygame.draw.circle(glow_circle, (*color[:3], glow_alpha), (r, r), r)
                         icon_surf.blit(glow_circle, (20 - r, 20 - r))
 
-                # Draw the custom icon
+                # Draw the icon
                 self.draw_custom_icon(icon_surf, icon_type, 20, 20, icon_size, color)
 
                 self.screen.blit(icon_surf, (MAP_SIZE * TILE_SIZE + 25, y_pos - 5))
 
-                # Power-up name with enhanced styling
+                # Power-up name
                 name_color = color
                 name_text = self.powerup_font.render(name, True, name_color)
 
@@ -731,10 +731,8 @@ class EnhancedMapVisualizer:
         return True
 
     def run(self):
-        """Enhanced main game loop"""
-        print("🎮 Enhanced Bomberman Map Visualizer Started!")
-        print("✨ Professional 2D graphics with smooth animations")
-        print("🎨 Gradient shading, realistic shadows, and glow effects")
+        """main game loop"""
+        print("🎮 Plaing with Fire 2 Map Visualizer Started!")
         print("🖱️ Click tiles to inspect | ESC to exit")
 
         running = True
