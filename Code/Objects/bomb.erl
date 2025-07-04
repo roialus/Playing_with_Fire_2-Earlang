@@ -2,7 +2,20 @@
 %%% @author dolev
 %%% @copyright (C) 2025, <COMPANY>
 %%% @doc
+%%% Interactions:
+%%% all outside interaction go through handle_call (sync.)
+%%% ** possible received messages: (input -> output) **
+%%% ignite -> frozen_ignited | explode_next_tick | not_remote
+%%% hit_by_explosion -> explode_next_tick
+%%% freeze -> frozen | frozen_ignited | refreeze | unexpected_call (error-catch)
+%%% {kick, Direction} -> started_movement
+%%% {req_move, granted} -> continue_movement
+%%% {req_move, denied} -> stopped_movement
 %%%
+%%% Explosion mechanism:
+%%% self-message triggers the explosion (can be delayed or triggered prematurely)
+%%% exit reason is {exploded, State#bomb_state.radius},
+%%% *for this to work well, parent process (GN) should monitor the bomb process
 %%% @end
 %%% Created : 04. Jul 2025 12:26
 %%%-------------------------------------------------------------------
@@ -107,7 +120,7 @@ handle_call(Request, _From, State = #bomb_state{}) ->
                     frozen -> % bomb frozen, will explode in 3 seconds
                         Timer_ref = erlang:send_after(?FREEZE_DELAY, self(), explode),
                         New_state = State#bomb_state{ignited=Timer_ref},
-                        {reply, ignited, New_state}
+                        {reply, frozen_ignited, New_state}
                 end;
             true -> % bomb type = regular/repeating - nothing to ignite
                 {reply, not_remote, State}
@@ -152,7 +165,7 @@ handle_call(Request, _From, State = #bomb_state{}) ->
                             {reply, frozen_ignited, New_state}
                     end;
                 {Type,Ignited} -> % catch-all for errors
-                    {stop, {unexpcted_call, Type, Ignited}, State}
+                    {stop, {unexpected_call, Type, Ignited}, State}
             end;
         {kick, Direction} -> % a player 'hit' the bomb with the proper buff, Direction is the movement direction of the player @ moment of hitting
         %% UNLIKE player process dynamics, the bomb is cleared to move in this direction to the next position
