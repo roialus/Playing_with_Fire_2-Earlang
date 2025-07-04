@@ -11,7 +11,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0]).
+-export([start_link/5]). % TODO: should probably be changed to start_monitor
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -160,7 +160,17 @@ handle_call(Request, _From, State = #bomb_state{}) ->
             New_state = State#bomb_state{movement=Direction},
             erlang:send_after(?MOVE_HALF_TILE, self(), update_pos),
             erlang:send_after(?FULL_MOVEMENT, self(), req_further_move),
-            {reply, started_movement, New_state}
+            {reply, started_movement, New_state};
+
+        {req_move, granted} -> % further movement is granted
+            erlang:send_after(?MOVE_HALF_TILE, self(), update_pos),
+            erlang:send_after(?FULL_MOVEMENT, self(), req_further_move),
+            {reply, continue_movement, State};
+
+        {req_move, denied} -> % further movement is denied - stop in current position
+            New_state = State#bomb_state{movement=[0,0]}, % reset movement
+            {reply, stopped_movement, New_state}
+
 
         % NO BASE CASE - todo: necessary? add later?
     end.
@@ -202,11 +212,25 @@ handle_info(Info, State = #bomb_state{}) ->
             erlang:send(State#bomb_state.gn_pid, {req_move, NewPos, self()}),
             {noreply, New_state};
 
+        hit_by_explosion -> % hit by another bomb's explosions
+            if
+                State#bomb_state.type == repeating -> % repeating type - tells GN to create another (regular) bomb at location
+                    {stop, {exploded_repeating, State#bomb_state.radius}, State};
+                true -> % not repeating bomb - just explodes and be done with it
+                    {stop, {exploded, State#bomb_state.radius}, State}
+            end;
+
+        explode -> % exploding based on internal timer/mechanism
+            if
+                State#bomb_state.type == repeating -> % repeating type - tells GN to create another (regular) bomb at location
+                    {stop, {exploded_repeating, State#bomb_state.radius}, State};
+                true -> % not repeating bomb - just explodes and be done with it
+                    {stop, {exploded, State#bomb_state.radius}, State}
+            end;
         
         _ -> {noreply, State}
     end.
 %% ----------------------------------------------------------------------
-
 
 
 %% @private
