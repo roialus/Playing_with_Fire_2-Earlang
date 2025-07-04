@@ -17,6 +17,11 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
     code_change/3]).
 
+-define(TICK, 50). % macro for tick-time - delay between ticks
+-define(FREEZE_DELAY, 3000). % macro for delay added when bomb is frozen
+-define(EXPLODE_DELAY, 3000). % macro for delay for normal explosions
+-define(MOVE_HALF_TILE, 500). % time to reach the 'border' between 2 tiles 
+-define(FULL_MOVEMENT, 1000). % time to reach the middle of the target tile
 
 -record(bomb_state, {
     type, % type of bomb - regular / remote / repeating
@@ -25,8 +30,9 @@
     time_placed, % time at which the bomb was placed, given by GN
     radius = 1, % blast radius on a + shape - number is how many blocks away the explosion is felt
     position, % position - [X,Y]
-    speed = [0,0], % speed - [x_axi, y_axi]
+    movement = [0,0], % speed - [x_axi, y_axi]
     owner = none, % player name/ID (?) of whoever placed the bomb. 'none' is for a bomb that fell from a broken tile (or simply no owner)
+    gn_pid, % GN Pid who oversees this process
     original_node_ID % original creating node ID - TODO: unsure of necessity 
 }).
 
@@ -44,7 +50,7 @@
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 
 start_link(Pos_x, Pos_y, Type, Time_created, Optional) ->
-    gen_server:start_link({local}, ?MODULE, [[Pos_x, Pos_y], Type, Time_created, node(), Optional], []).
+    gen_server:start_link({local}, ?MODULE, [[Pos_x, Pos_y], Type, Time_created, node(), self(), Optional], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -57,22 +63,24 @@ start_link(Pos_x, Pos_y, Type, Time_created, Optional) ->
     {ok, State :: #tile_state{}} | {ok, State :: #tile_state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
 
-init([Position, Type, Time_created, Node_ID, [] ]) -> % no optional data (no owner)
+init([Position, Type, Time_created, Node_ID, GN_Pid [] ]) -> % no optional data (no owner)
     State = case Type of 
-        remote -> #bomb_state{position=Position, type=Type, ignited=false, time_placed=Time_created, original_node_ID=Node_ID};
-        _ -> Timer_ref = erlang:send_after(3000, self(), explode), % send self-message to explode in 3 seconds
-            #bomb_state{position=Position, type=Type, ignited=Timer_ref, time_placed=Time_created, original_node_ID=Node_ID}
+        remote ->
+            #bomb_state{position=Position, type=Type, ignited=false, time_placed=Time_created, original_node_ID=Node_ID, gn_pid=GN_Pid};
+        _ ->
+            Timer_ref = erlang:send_after(?EXPLODE_DELAY, self(), explode), % send self-message to explode in 3 seconds
+            #bomb_state{position=Position, type=Type, ignited=Timer_ref, time_placed=Time_created, original_node_ID=Node_ID, gn_pid=GN_Pid}
     end,
-    erlang:send_after(0, self(), hibernate),
     {ok, State};
 
 init([Position, Type, Time_created, Node_ID, [Owner_ID, Radius]]) -> % with optional data (owner, radius)
     State = case Type of 
-        remote -> #bomb_state{radius=Radius, owner=Owner_ID, position=Position, type=Type, ignited=false, time_placed=Time_created, original_node_ID=Node_ID};
-        _ -> Timer_ref = erlang:send_after(3000, self(), explode), % send self-message to explode in 3 seconds
+        remote ->
+            #bomb_state{radius=Radius, owner=Owner_ID, position=Position, type=Type, ignited=false, time_placed=Time_created, original_node_ID=Node_ID};
+        _ ->
+            Timer_ref = erlang:send_after(?EXPLODE_DELAY, self(), explode), % send self-message to explode in 3 seconds
             #bomb_state{radius=Radius, owner=Owner_ID, position=Position, type=Type, ignited=Timer_ref, time_placed=Time_created, original_node_ID=Node_ID}
     end,
-    erlang:send_after(0, self(), hibernate),
     {ok, State}.
 
 %% @private
@@ -86,25 +94,78 @@ init([Position, Type, Time_created, Node_ID, [Owner_ID, Radius]]) -> % with opti
     {stop, Reason :: term(), Reply :: term(), NewState :: #tile_state{}} |
     {stop, Reason :: term(), NewState :: #tile_state{}}).
 
-% ** CONTINUE FROM HERE **
 
-handle_call(Request, _From, State = #tile_state{}) ->
-    % mechanism: stops itself if needs be, returns the 'contains' field
+handle_call(Request, _From, State = #bomb_state{}) ->
     case Request of
-        hi -> case State#tile_state.type of
-                     unbreakable -> % damage to unbreakable tile does nothing
-                        {reply, unbreakable, State};
-                     breakable -> % damage to breakable tile breaks it, letting the GN know about the 'drop'
-                         {stop, normal, State#tile_state.contains ,State}; % calls terminate callback function
-                     two_hit -> % moves to 2nd phase of breaking
-                         New_State = State#tile_state{type = one_hit},
-                         {reply, one_hit, New_State};
-                    one_hit -> % being hit again - breaks the tile
-                        {stop, normal, State#tile_state.contains, State} % calls terminate callback function, replies with 'contains'
-                 end;
-        terminate -> {stop, normal, State}
-            % NO BASE CASE - todo: necessary? add later?
+        ignite -> if %% ignite message received
+            State#bomb_state.type == remote -> % bomb type = remote
+                case State#bomb_state.status of
+                    normal -> % bomb not frozen, set to explode next game-tick
+                        Timer_ref = erlang:send_after(?TICK, self(), explode),
+                        New_state = State#bomb_state{ignited=Timer_ref},
+                        {reply, explode_next_tick, New_state};
+                    frozen -> % bomb frozen, will explode in 3 seconds
+                        Timer_ref = erlang:send_after(?FREEZE_DELAY, self(), explode),
+                        New_state = State#bomb_state{ignited=Timer_ref},
+                        {reply, ignited, New_state}
+                end;
+            true -> % bomb type = regular/repeating - nothing to ignite
+                {reply, not_remote, State};
+            end;
+            
+        hit_by_explosion -> % another bomb exploded and the explosion reached this bomb
+            erlang:send_after(?TICK, self(), hit_by_explosion), % explodes next tick
+            {reply, explode_next_tick, State};
+        freeze -> % a freezing action was applied to the bomb
+            case {State#bomb_state.type, State#bomb_state.ignited} of
+                {remote, false} -> % bomb type = remote, not yet ignited
+                    New_state = State#bomb_state{status=frozen},
+                    {reply, frozen, New_state};
+                {remote, Current_timer_ref} -> % bomb type = remote, already ignited
+                    %% disables current timer, adds +3 seconds to the explosions   
+                    case erlang:cancel_timer(Current_timer_ref) of % "disable" previous explosion
+                        true -> ok;
+                        false -> 
+                            receive
+                                exploded -> ok;
+                            after 0 -> ok
+                            end
+                    end,
+                    New_timer_ref = erlang:send_after(?FREEZE_DELAY, self(), exploded), 
+                    New_state = State#bomb_state{status=frozen, ignited=New_timer_ref},
+                    {reply, frozen_ignited, New_state};
+                {_, Current_timer_ref} -> % bomb type = regular/repeating, already ignited
+                    if
+                        State#bomb_state.status == frozen -> % can't re-freeze a bomb, ignore action
+                            {reply, refreeze, State};
+                        true -> % bomb not frozen before
+                            case erlang:cancel_timer(Current_timer_ref) of % "disable" previous explosion
+                                true -> ok;
+                                false -> 
+                                    receive
+                                        exploded -> ok;
+                                    after 0 -> ok
+                                    end
+                            end,
+                            New_timer_ref = erlang:send_after(?FREEZE_DELAY, self(), exploded),
+                            New_state = State#bomb_state{status=frozen, ignited=New_timer_ref},
+                            {reply, frozen_ignited, New_state}
+                    end;
+                {_Type,_Ignited} -> % catch-all for erorrs
+                    {stop, {unexpcted_call, Type, Ignited}, State};
+
+        {kick, Direction} -> % a player 'hit' the bomb with the proper buff, Direction is the movement direction of the player @ moment of hitting
+        %% UNLIKE player process dynamics, the bomb is cleared to move in this direction to the next position
+        %% when it reaches the next tile it asks for permissions to move to the next one, and so on.
+            New_state = State#bomb_state{movement=Direction},
+            erlang:send_after(?MOVE_HALF_TILE, self(), update_pos),
+            erlang:send_after(?FULL_MOVEMENT, self(), req_further_move),
+            {reply, started_movement, New_state}
+
+        % NO BASE CASE - todo: necessary? add later?
     end.
+
+%% ----------------------------------------------------------------------
 
 %% @private
 %% @doc Handling cast messages - async. messaging
@@ -116,6 +177,8 @@ handle_call(Request, _From, State = #tile_state{}) ->
 handle_cast(_Request, State = #tile_state{}) ->
     {noreply, State}.
 
+%% ----------------------------------------------------------------------
+
 %% @private
 %% @doc Handling all non call/cast messages
 -spec(handle_info(Info :: timeout() | term(), State :: #tile_state{}) ->
@@ -123,11 +186,26 @@ handle_cast(_Request, State = #tile_state{}) ->
     {noreply, NewState :: #tile_state{}, timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: #tile_state{}}).
 
-handle_info(Info, State = #tile_state{}) ->
+handle_info(Info, State = #bomb_state{}) ->
     case Info of
-        hibernate -> {noreply, State, hibernate}; % todo: added a hibernation mode - maybe sends a message at the start to all tiles to sleep?
+        hibernate ->
+            {noreply, State, hibernate};
+
+        update_pos -> % reached the halfway point of the movement, update position and notify GN
+            NewPos = lists:zipwith(fun(X,Y) -> X+Y end, State#bomb_state.position, State#bomb_state.movement),
+            New_state = State#bomb_state{position=NewPos},
+            erlang:send(State#bomb_state.gn_pid, {updated_pos, NewPos, self()}),
+            {noreply, New_state};
+
+        req_further_move -> % reached middle of next tile, ask GN for permission to keep going
+            Next_pos = lists:zipwith(fun(X,Y) -> X+Y end, State#bomb_state.position, State#bomb_state.movement),
+            erlang:send(State#bomb_state.gn_pid, {req_move, NewPos, self()}),
+            {noreply, New_state};
+
+        
         _ -> {noreply, State}
     end.
+%% ----------------------------------------------------------------------
 
 
 
