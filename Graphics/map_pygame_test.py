@@ -184,69 +184,194 @@ class EnhancedMapVisualizer:
         }
 
     def load_test_data(self):
-        """Load map data"""
-        # Example map data for testing
-        tiles = [
-            [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-            [2, 4, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 2],
-            [2, 0, 0, 0, 1, 1, 0, 1, 0, 3, 1, 0, 3, 0, 0, 2],
-            [2, 0, 1, 2, 1, 2, 2, 3, 1, 1, 0, 3, 1, 0, 0, 2],
-            [2, 2, 1, 3, 0, 1, 3, 1, 3, 3, 2, 0, 1, 1, 0, 2],
-            [2, 2, 0, 1, 1, 1, 1, 1, 1, 0, 1, 3, 0, 0, 0, 2],
-            [2, 0, 0, 0, 2, 3, 1, 0, 1, 3, 3, 1, 2, 0, 0, 2],
-            [2, 1, 0, 0, 2, 0, 1, 1, 1, 1, 3, 1, 1, 1, 0, 2],
-            [2, 0, 3, 0, 0, 1, 1, 1, 1, 2, 3, 0, 0, 0, 0, 2],
-            [2, 0, 3, 0, 1, 1, 2, 1, 0, 1, 3, 1, 0, 0, 0, 2],
-            [2, 2, 1, 2, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2],
-            [2, 0, 1, 2, 2, 0, 1, 1, 1, 2, 0, 3, 0, 0, 1, 2],
-            [2, 3, 1, 2, 0, 3, 3, 0, 2, 1, 0, 1, 0, 1, 1, 2],
-            [2, 0, 0, 1, 1, 0, 0, 0, 0, 1, 3, 2, 0, 0, 0, 2],
-            [2, 4, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 4, 2],
-            [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
+        """Load map data from Erlang unified grid format"""
+        # New unified grid format from Erlang: {tile_type, powerup_type, bomb_type, player_id}
+        # Convert Erlang atoms to Python strings and map to numbers for compatibility
+
+        # Tile type mapping (atoms to numbers)
+        tile_mapping = {
+            'free': 0,
+            'breakable': 1,
+            'unbreakable': 2,
+            'strong': 3,
+            'player_start': 4
+        }
+
+        # Powerup mapping (atoms to strings)
+        powerup_mapping = {
+            'none': 'none',
+            'move_speed': 'move_speed',
+            'remote_ignition': 'remote_ignition',
+            'repeat_bombs': 'repeat_bombs',
+            'kick_bomb': 'kick_bomb',
+            'phased': 'phased',
+            'plus_bombs': 'plus_bombs',
+            'bigger_explosion': 'bigger_explosion',
+            'plus_life': 'plus_life',
+            'freeze_bomb': 'freeze_bomb'
+        }
+
+        # Raw Erlang grid data (converted from the generated file)
+        erlang_grid = [
+            [('unbreakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none')],
+            [('unbreakable', 'none', 'none', 'none'), ('player_start', 'none', 'none', 'player_1'),
+             ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('breakable', 'plus_bombs', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('breakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('player_start', 'none', 'none', 'player_2'), ('unbreakable', 'none', 'none', 'none')],
+            [('unbreakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('strong', 'phased', 'none', 'none'),
+             ('breakable', 'none', 'none', 'none'), ('breakable', 'remote_ignition', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('strong', 'kick_bomb', 'none', 'none'), ('breakable', 'kick_bomb', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none')],
+            [('unbreakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('breakable', 'remote_ignition', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('breakable', 'move_speed', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('breakable', 'none', 'none', 'none'),
+             ('breakable', 'remote_ignition', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('breakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none')],
+            [('unbreakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('breakable', 'plus_bombs', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('breakable', 'freeze_bomb', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('strong', 'plus_life', 'none', 'none'), ('strong', 'bigger_explosion', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('breakable', 'kick_bomb', 'none', 'none'), ('breakable', 'repeat_bombs', 'none', 'none'),
+             ('breakable', 'none', 'none', 'none'), ('breakable', 'kick_bomb', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none')],
+            [('unbreakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('strong', 'phased', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('breakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('breakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('breakable', 'plus_bombs', 'none', 'none'), ('breakable', 'kick_bomb', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('breakable', 'repeat_bombs', 'none', 'none'),
+             ('breakable', 'repeat_bombs', 'none', 'none'), ('unbreakable', 'none', 'none', 'none')],
+            [('unbreakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('breakable', 'repeat_bombs', 'none', 'none'), ('strong', 'freeze_bomb', 'none', 'none'),
+             ('breakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('strong', 'bigger_explosion', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('breakable', 'none', 'none', 'none'),
+             ('breakable', 'none', 'none', 'none'), ('strong', 'bigger_explosion', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none')],
+            [('unbreakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('breakable', 'kick_bomb', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('breakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('breakable', 'none', 'none', 'none'), ('strong', 'kick_bomb', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('breakable', 'none', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('strong', 'plus_life', 'none', 'none'),
+             ('breakable', 'kick_bomb', 'none', 'none'), ('unbreakable', 'none', 'none', 'none')],
+            [('unbreakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('breakable', 'none', 'none', 'none'),
+             ('breakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('breakable', 'plus_bombs', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('breakable', 'remote_ignition', 'none', 'none'), ('breakable', 'none', 'none', 'none'),
+             ('breakable', 'none', 'none', 'none'), ('breakable', 'none', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('breakable', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none')],
+            [('unbreakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('strong', 'plus_life', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('breakable', 'none', 'none', 'none'),
+             ('breakable', 'remote_ignition', 'none', 'none'), ('breakable', 'bigger_explosion', 'none', 'none'),
+             ('breakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none')],
+            [('unbreakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('breakable', 'none', 'none', 'none'), ('strong', 'remote_ignition', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('breakable', 'plus_life', 'none', 'none'),
+             ('breakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('breakable', 'none', 'none', 'none'), ('strong', 'bigger_explosion', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('breakable', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none')],
+            [('unbreakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('breakable', 'none', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('strong', 'remote_ignition', 'none', 'none'),
+             ('breakable', 'plus_bombs', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('breakable', 'plus_life', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('breakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('breakable', 'plus_bombs', 'none', 'none'), ('breakable', 'kick_bomb', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none')],
+            [('unbreakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('breakable', 'plus_bombs', 'none', 'none'), ('strong', 'move_speed', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('breakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('strong', 'phased', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('strong', 'plus_bombs', 'none', 'none'), ('strong', 'plus_life', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none')],
+            [('unbreakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('breakable', 'plus_bombs', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('strong', 'move_speed', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none')],
+            [('unbreakable', 'none', 'none', 'none'), ('player_start', 'none', 'none', 'player_3'),
+             ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('strong', 'remote_ignition', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('free', 'none', 'none', 'none'), ('free', 'none', 'none', 'none'),
+             ('player_start', 'none', 'none', 'player_4'), ('unbreakable', 'none', 'none', 'none')],
+            [('unbreakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none'),
+             ('unbreakable', 'none', 'none', 'none'), ('unbreakable', 'none', 'none', 'none')]
         ]
-        # Example power-ups for testing
-        powerups = [
-            ["none"] * 16,
-            ["none", "none", "none", "plus_life", "none", "none", "none", "none", "none", "none", "none", "none",
-             "none", "none", "none", "none"],
-            ["none", "none", "none", "none", "freeze_bomb", "none", "none", "plus_bombs", "none", "move_speed",
-             "plus_life", "none", "phased", "none", "none", "none"],
-            ["none", "none", "none", "none", "plus_life", "none", "none", "plus_life", "none", "none", "none",
-             "bigger_explosion", "none", "none", "none", "none"],
-            ["none", "none", "none", "repeat_bombs", "none", "none", "bigger_explosion", "none", "remote_ignition",
-             "bigger_explosion", "none", "none", "bigger_explosion", "none", "none", "none"],
-            ["none", "none", "none", "kick_bomb", "remote_ignition", "none", "none", "plus_bombs", "none", "none",
-             "none", "remote_ignition", "none", "none", "none", "none"],
-            ["none", "none", "none", "none", "none", "bigger_explosion", "none", "none", "plus_life", "move_speed",
-             "plus_bombs", "kick_bomb", "none", "none", "none", "none"],
-            ["none", "plus_life", "none", "none", "none", "none", "none", "kick_bomb", "plus_bombs", "plus_life",
-             "kick_bomb", "move_speed", "remote_ignition", "freeze_bomb", "none", "none"],
-            ["none", "none", "plus_life", "none", "none", "repeat_bombs", "none", "plus_bombs", "none", "none",
-             "plus_bombs", "none", "none", "none", "none", "none"],
-            ["none", "none", "move_speed", "none", "none", "plus_life", "none", "move_speed", "none", "none",
-             "kick_bomb", "none", "none", "none", "none", "none"],
-            ["none", "none", "remote_ignition", "none", "none", "repeat_bombs", "none", "none", "none", "none", "none",
-             "none", "none", "none", "none", "none"],
-            ["none", "none", "none", "none", "none", "none", "bigger_explosion", "none", "plus_bombs", "none", "none",
-             "bigger_explosion", "none", "none", "plus_life", "none"],
-            ["none", "remote_ignition", "remote_ignition", "none", "none", "bigger_explosion", "freeze_bomb", "none",
-             "none", "none", "none", "plus_life", "none", "none", "none", "none"],
-            ["none", "none", "none", "none", "bigger_explosion", "none", "none", "none", "none", "remote_ignition",
-             "plus_life", "none", "none", "none", "none", "none"],
-            ["none", "none", "none", "none", "none", "none", "none", "kick_bomb", "none", "phased", "remote_ignition",
-             "none", "none", "none", "none", "none"],
-            ["none"] * 16
-        ]
+
+        # Convert to the format expected by the current visualizer
+        tiles = []
+        powerups = []
+        player_starts = []
+
+        for x in range(len(erlang_grid)):
+            tile_row = []
+            powerup_row = []
+
+            for y in range(len(erlang_grid[x])):
+                cell = erlang_grid[x][y]
+                tile_type, powerup_type, bomb_type, player_id = cell
+
+                # Convert tile type to number
+                tile_num = tile_mapping.get(tile_type, 0)
+                tile_row.append(tile_num)
+
+                # Convert powerup to string
+                powerup_str = powerup_mapping.get(powerup_type, 'none')
+                powerup_row.append(powerup_str)
+
+                # Track player starts
+                if tile_type == 'player_start' and player_id != 'none':
+                    player_num = int(player_id.split('_')[1])  # Extract number from 'player_1', etc.
+                    player_starts.append({'player': player_num, 'x': x, 'y': y})
+
+            tiles.append(tile_row)
+            powerups.append(powerup_row)
 
         return {
             'tiles': tiles,
             'powerups': powerups,
-            'player_starts': [
-                {'player': 1, 'x': 1, 'y': 1},
-                {'player': 2, 'x': 1, 'y': 14},
-                {'player': 3, 'x': 14, 'y': 1},
-                {'player': 4, 'x': 14, 'y': 14}
-            ]
+            'player_starts': player_starts
         }
 
     def draw_gradient_rect(self, surface, color1, color2, rect, vertical=True):
@@ -730,18 +855,18 @@ class EnhancedMapVisualizer:
 
         surface.blit(bg_surf, (bg_rect.x, bg_rect.y))
 
-        # Player avatar (mini player drawing) 
+        # Player avatar (mini player drawing)
         avatar_x = 25
         avatar_y = y_pos + 10
         self.draw_mini_player(surface, avatar_x, avatar_y, player_id, scale=0.6)
 
-        # Player ID 
+        # Player ID
         player_text = f"PLAYER {player_id}"
         player_surface = self.small_font.render(player_text, True, COLORS['TEXT_WHITE'])
         surface.blit(player_surface, (avatar_x - 15, avatar_y + 25))
 
         # Statistics with visual elements
-        stats_start_y = y_pos + 10  
+        stats_start_y = y_pos + 10
         stat_height = 18
 
         # Life - Draw hearts
@@ -787,7 +912,7 @@ class EnhancedMapVisualizer:
 
         # Draw ability icons with proper powerup icons
         ability_x = 85
-        ability_y = stats_start_y + stat_height * 5 + 8  
+        ability_y = stats_start_y + stat_height * 5 + 8
         for i, ability in enumerate(special_only_abilities[:3]):  # Max 3 abilities shown
             icon_x = ability_x + i * 20  # Slightly closer spacing
             # Make sure icons stay within the player's area
@@ -881,7 +1006,7 @@ class EnhancedMapVisualizer:
 
         # Power-ups in horizontal layout
         start_x = 30
-        start_y = 50  
+        start_y = 50
         powerup_data = [
             ("lightning", "LIGHTNING SPEED", "move_speed", COLORS['TEXT_CYAN']),
             ("remote", "REMOTE DETONATOR", "remote_ignition", COLORS['TEXT_ORANGE']),
