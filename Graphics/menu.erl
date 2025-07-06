@@ -1,4 +1,4 @@
--module(gui_test).
+-module(menu).
 -export([start/0, send/2]).
 
 start() ->
