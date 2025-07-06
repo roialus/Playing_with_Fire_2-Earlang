@@ -211,10 +211,9 @@ display_response(Response, PlayerNumber) ->
             io:format("Player ~p: ~p~n", [PlayerNumber, Response])
     end.
 
-%% @doc Read keyboard input - implement based on your platform
+%% @doc Read keyboard input 
 read_keyboard_input() ->
-    % This is a placeholder - implement based on your system
-    % For testing, you can use simple input:
+    % For testing
     case io:get_chars('', 1) of
         eof -> no_input;
         " " -> space;
