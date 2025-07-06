@@ -6,12 +6,22 @@ import random
 # Initialize Pygame
 pygame.init()
 
-# Enhanced Constants
-TILE_SIZE = 48  # Larger tiles for better detail
-MAP_SIZE = 16
-WINDOW_WIDTH = MAP_SIZE * TILE_SIZE + 300  # Extra space for UI
-WINDOW_HEIGHT = MAP_SIZE * TILE_SIZE + 150
-FPS = 60
+# Enhanced Constants - NEW LAYOUT - OPTIMIZED SIZE
+TILE_SIZE = 40  # Size of each tile in pixels
+MAP_SIZE = 16   # Size of the map in tiles (16x16)
+PLAYER_PANEL_WIDTH = 220  # Left panel for player stats
+POWERUP_PANEL_HEIGHT = 140  # Bottom panel for power-ups - increased height
+WINDOW_WIDTH = PLAYER_PANEL_WIDTH + MAP_SIZE * TILE_SIZE + 20  # Player panel + map + margin
+WINDOW_HEIGHT = MAP_SIZE * TILE_SIZE + POWERUP_PANEL_HEIGHT + 20  # Map + power-ups + margin
+# print("window size:", WINDOW_WIDTH, "x", WINDOW_HEIGHT)
+MIN_WINDOW_WIDTH = 800  # Minimum width for the window
+MIN_WINDOW_HEIGHT = 600 # Minimum height for the window
+FPS = 60    # Frames per second for the game loop
+
+# Layout offsets
+MAP_OFFSET_X = PLAYER_PANEL_WIDTH + 10  # Map starts after player panel
+MAP_OFFSET_Y = 10  # Small top margin
+POWERUP_OFFSET_Y = MAP_OFFSET_Y + MAP_SIZE * TILE_SIZE + 10  # Power-ups below map
 
 # Professional Color Palette
 COLORS = {
@@ -79,11 +89,19 @@ COLORS = {
 
 class EnhancedMapVisualizer:
     def __init__(self):
-        self.screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
-        pygame.display.set_caption("🎮 Playing with Fire 2 Map")
+        # Make window resizable and start with smaller size
+        initial_width = min(WINDOW_WIDTH, 900)
+        initial_height = min(WINDOW_HEIGHT, 700)
+        self.screen = pygame.display.set_mode((initial_width, initial_height), pygame.RESIZABLE)
+        pygame.display.set_caption("🎮 Playing with Fire 2 Map (Resizable)")
         self.clock = pygame.time.Clock()
 
-        # Enhanced fonts
+        # Current window dimensions
+        self.current_width = initial_width
+        self.current_height = initial_height
+        self.scale_factor = min(initial_width / WINDOW_WIDTH, initial_height / WINDOW_HEIGHT)
+
+        # Fonts
         self.title_font = pygame.font.Font(None, 36)
         self.font = pygame.font.Font(None, 24)
         self.small_font = pygame.font.Font(None, 18)
@@ -95,14 +113,79 @@ class EnhancedMapVisualizer:
         self.camera_shake = 0
         self.selected_tile = None
 
-        # Load map data
+        # Load map data and player stats
         self.map_data = self.load_test_data()
+        self.player_stats = self.load_player_stats()
 
-        # Create surface for smooth rendering
+        # Create surfaces for smooth rendering (will be scaled)
         self.map_surface = pygame.Surface((MAP_SIZE * TILE_SIZE, MAP_SIZE * TILE_SIZE))
+        self.player_panel_surface = pygame.Surface((PLAYER_PANEL_WIDTH, MAP_SIZE * TILE_SIZE))
+        self.powerup_panel_surface = pygame.Surface((WINDOW_WIDTH, POWERUP_PANEL_HEIGHT))
+
+        # Virtual surface for full layout
+        self.virtual_surface = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
+
+    def handle_window_resize(self, new_width, new_height):
+        """Handle window resizing"""
+        self.current_width = max(new_width, MIN_WINDOW_WIDTH)
+        self.current_height = max(new_height, MIN_WINDOW_HEIGHT)
+
+        # Update scale factor to maintain aspect ratio
+        self.scale_factor = min(
+            self.current_width / WINDOW_WIDTH,
+            self.current_height / WINDOW_HEIGHT
+        )
+
+        # Recreate screen surface
+        self.screen = pygame.display.set_mode((self.current_width, self.current_height), pygame.RESIZABLE)
+
+    def load_player_stats(self):
+        """Load player statistics"""
+        """Default stats:
+        life: 3
+        speed: 1
+        bombs: 1
+        explosion_radius: 1
+        special_abilities: []"""
+
+        return {
+            1: {
+                'life': 3,
+                'speed': 1,
+                'bombs': 3,
+                'explosion_radius': 2,
+                'special_abilities': [],  # No special abilities yet - only bomb factory, ghost, freeze, kick
+                'color': COLORS['PLAYER_1']
+            },
+            2: {
+                'life': 2,
+                'speed': 2,  # move_speed increases this
+                'bombs': 4,
+                'explosion_radius': 1,
+                'special_abilities': ['kick_bomb'],  # Only special abilities
+                'color': COLORS['PLAYER_2']
+            },
+            3: {
+                'life': 4,
+                'speed': 1,
+                'bombs': 2,
+                'explosion_radius': 3,  # bigger_explosion increases this
+                'special_abilities': [],  # No special abilities yet
+                'color': COLORS['PLAYER_3']
+            },
+            4: {
+                'life': 1,
+                'speed': 3,
+                'bombs': 5,
+                'explosion_radius': 1,
+                'special_abilities': ['plus_bombs', 'phased', 'freeze_bomb'],  # Only special abilities
+                'color': COLORS['PLAYER_4']
+            }
+        }
 
     def load_test_data(self):
         """Load map data"""
+        # Example map data for testing
         tiles = [
             [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
             [2, 4, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 2],
@@ -121,7 +204,7 @@ class EnhancedMapVisualizer:
             [2, 4, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 4, 2],
             [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
         ]
-
+        # Example power-ups for testing
         powerups = [
             ["none"] * 16,
             ["none", "none", "none", "plus_life", "none", "none", "none", "none", "none", "none", "none", "none",
@@ -393,8 +476,6 @@ class EnhancedMapVisualizer:
         pygame.draw.circle(surface, tuple(max(0, c - 30) for c in COLORS['SKIN']),
                            (center_x, head_y), 10, 1)
 
-        # Enhanced facial features
-        # Eyes with more detail
         # Left eye
         pygame.draw.ellipse(surface, (255, 255, 255), (center_x - 6, head_y - 4, 6, 4))
         pygame.draw.circle(surface, (0, 0, 0), (center_x - 3, head_y - 2), 2)
@@ -482,15 +563,18 @@ class EnhancedMapVisualizer:
             pygame.draw.line(surface, color, (center_x, center_y - size // 2), (center_x, center_y - size), 2)
 
         elif icon_type == "factory":
-            # Gear/factory symbol
-            pygame.draw.circle(surface, color, (center_x, center_y), size // 2, 3)
-            for i in range(8):
-                angle = i * math.pi / 4
-                x1 = center_x + int((size // 2 - 3) * math.cos(angle))
-                y1 = center_y + int((size // 2 - 3) * math.sin(angle))
-                x2 = center_x + int((size // 2 + 5) * math.cos(angle))
-                y2 = center_y + int((size // 2 + 5) * math.sin(angle))
-                pygame.draw.line(surface, color, (x1, y1), (x2, y2), 2)
+            # Big bomb with smaller bomb beside it (bomb factory)
+            # Main big bomb
+            pygame.draw.circle(surface, color, (center_x - size // 6, center_y), size // 2)
+            pygame.draw.line(surface, color, (center_x - size // 6, center_y - size // 2),
+                             (center_x - size // 3, center_y - size), 2)
+            pygame.draw.circle(surface, (255, 200, 0), (center_x - size // 3, center_y - size), 2)
+
+            # Smaller bomb beside it
+            pygame.draw.circle(surface, color, (center_x + size // 4, center_y + size // 6), size // 4)
+            pygame.draw.line(surface, color, (center_x + size // 4, center_y + size // 6 - size // 4),
+                             (center_x + size // 6, center_y - size // 3), 1)
+            pygame.draw.circle(surface, (255, 200, 0), (center_x + size // 6, center_y - size // 3), 1)
 
         elif icon_type == "boot":
             # Leg in side view kicking
@@ -560,7 +644,7 @@ class EnhancedMapVisualizer:
                              (center_x + size // 3, center_y - size // 3), 3)
 
     def draw_enhanced_map(self):
-        """Complete map"""
+        """Draw the complete enhanced map on the right side"""
         self.map_surface.fill(COLORS['BACKGROUND'])
 
         # Update animations
@@ -577,7 +661,7 @@ class EnhancedMapVisualizer:
                 powerup = self.map_data['powerups'][x][y]
                 has_powerup = powerup != "none"
 
-                #  Draw floor 
+                #  Draw floor
                 if tile_type != 2:
                     self.draw_enhanced_floor(self.map_surface, pixel_x, pixel_y)
 
@@ -601,30 +685,203 @@ class EnhancedMapVisualizer:
                     pygame.draw.rect(highlight_surf, COLORS['SELECTION'], (0, 0, TILE_SIZE, TILE_SIZE))
                     self.map_surface.blit(highlight_surf, (pixel_x, pixel_y))
 
-        # Blit map to main screen
-        self.screen.blit(self.map_surface, (0, 0))
+        # Blit map to virtual surface at the right position
+        self.virtual_surface.blit(self.map_surface, (MAP_OFFSET_X, MAP_OFFSET_Y))
 
-    def draw_enhanced_ui(self):
-        """Draw clean power-ups only UI panel"""
-        # UI background with gradient
-        ui_rect = pygame.Rect(MAP_SIZE * TILE_SIZE, 0, 300, WINDOW_HEIGHT)
-        self.draw_gradient_rect(self.screen, COLORS['UI_BACKGROUND'], COLORS['PANEL_BG'], ui_rect)
+    def draw_player_stats_panel(self):
+        """Draw player statistics panel on the left side"""
+        self.player_panel_surface.fill(COLORS['UI_BACKGROUND'])
 
-        # Title with glow effect
-        title_y = 30
-        title_text = "POWER-UPS"
-
-        # Title shadow
+        # Panel title
+        title_text = "PLAYERS"
+        title_surface = self.title_font.render(title_text, True, COLORS['TEXT_GOLD'])
         title_shadow = self.title_font.render(title_text, True, COLORS['TEXT_SHADOW'])
-        self.screen.blit(title_shadow, (MAP_SIZE * TILE_SIZE + 22, title_y + 2))
 
-        # Title main with animated glow
-        title_color = COLORS['TEXT_GOLD']
-        title_main = self.title_font.render(title_text, True, title_color)
-        self.screen.blit(title_main, (MAP_SIZE * TILE_SIZE + 20, title_y))
+        self.player_panel_surface.blit(title_shadow, (12, 12))
+        self.player_panel_surface.blit(title_surface, (10, 10))
 
-        # Power-ups 
-        start_y = 100
+        # Draw each player's stats
+        start_y = 60
+        player_height = (MAP_SIZE * TILE_SIZE - 80) // 4  # Divide remaining space by 4 players
+
+        for player_id in range(1, 5):
+            y_pos = start_y + (player_id - 1) * player_height
+            self.draw_single_player_stats(self.player_panel_surface, player_id, y_pos, player_height)
+
+        # Blit to virtual surface
+        self.virtual_surface.blit(self.player_panel_surface, (0, MAP_OFFSET_Y))
+
+    def draw_single_player_stats(self, surface, player_id, y_pos, height):
+        """Draw individual player statistics with visual elements - improved layout"""
+        stats = self.player_stats[player_id]
+        player_color = stats['color']
+
+        # Player background with gradient
+        bg_rect = pygame.Rect(10, y_pos, PLAYER_PANEL_WIDTH - 20, height - 10)
+        bg_alpha = int(40 + 20 * math.sin(self.time * 2 + player_id))
+        bg_surf = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
+
+        # Create gradient background
+        for y in range(bg_rect.height):
+            ratio = y / bg_rect.height
+            alpha = int(bg_alpha * (1 - ratio * 0.5))
+            color = (*player_color[:3], alpha)
+            pygame.draw.line(bg_surf, color, (0, y), (bg_rect.width, y))
+
+        surface.blit(bg_surf, (bg_rect.x, bg_rect.y))
+
+        # Player avatar (mini player drawing) 
+        avatar_x = 25
+        avatar_y = y_pos + 10
+        self.draw_mini_player(surface, avatar_x, avatar_y, player_id, scale=0.6)
+
+        # Player ID 
+        player_text = f"PLAYER {player_id}"
+        player_surface = self.small_font.render(player_text, True, COLORS['TEXT_WHITE'])
+        surface.blit(player_surface, (avatar_x - 15, avatar_y + 25))
+
+        # Statistics with visual elements
+        stats_start_y = y_pos + 10  
+        stat_height = 18
+
+        # Life - Draw hearts
+        life_text = "Life:"
+        life_surface = self.small_font.render(life_text, True, (255, 100, 120))
+        surface.blit(life_surface, (80, stats_start_y))
+
+        # Draw hearts for life count
+        heart_start_x = 115
+        for i in range(stats['life']):
+            heart_x = heart_start_x + i * 12
+            self.draw_mini_heart(surface, heart_x, stats_start_y + 4, (255, 100, 120))
+
+        # Speed
+        speed_text = f"Speed: {stats['speed']}"
+        speed_surface = self.small_font.render(speed_text, True, COLORS['TEXT_CYAN'])
+        surface.blit(speed_surface, (80, stats_start_y + stat_height))
+
+        # Bombs - Draw bomb icons
+        bombs_text = "Bombs:"
+        bombs_surface = self.small_font.render(bombs_text, True, (255, 150, 100))
+        surface.blit(bombs_surface, (80, stats_start_y + stat_height * 2))
+
+        # Draw bombs for bomb count
+        bomb_start_x = 125
+        for i in range(stats['bombs']):
+            bomb_x = bomb_start_x + i * 12
+            self.draw_mini_bomb(surface, bomb_x, stats_start_y + stat_height * 2 + 4, (255, 150, 100))
+
+        # Explosion radius
+        radius_text = f"Radius: {stats['explosion_radius']}"
+        radius_surface = self.small_font.render(radius_text, True, (255, 200, 0))
+        surface.blit(radius_surface, (80, stats_start_y + stat_height * 3))
+
+        # Special abilities with actual powerup icons (only special abilities, not stat boosts)
+        abilities_text = "Abilities:"
+        abilities_surface = self.small_font.render(abilities_text, True, COLORS['TEXT_WHITE'])
+        surface.blit(abilities_surface, (80, stats_start_y + stat_height * 4))
+
+        # Filter to only show special abilities (not basic stat boosts)
+        special_only_abilities = [ability for ability in stats['special_abilities']
+                                  if ability in ['plus_bombs', 'repeat_bombs', 'phased', 'freeze_bomb', 'kick_bomb']]
+
+        # Draw ability icons with proper powerup icons
+        ability_x = 85
+        ability_y = stats_start_y + stat_height * 5 + 8  
+        for i, ability in enumerate(special_only_abilities[:3]):  # Max 3 abilities shown
+            icon_x = ability_x + i * 20  # Slightly closer spacing
+            # Make sure icons stay within the player's area
+            if icon_x + 12 < PLAYER_PANEL_WIDTH - 20:
+                self.draw_ability_powerup_icon(surface, icon_x, ability_y, ability)
+
+    def draw_mini_player(self, surface, x, y, player_num, scale=1.0):
+        """Draw a mini version of the player character"""
+        player_colors = {
+            1: COLORS['PLAYER_1'], 2: COLORS['PLAYER_2'],
+            3: COLORS['PLAYER_3'], 4: COLORS['PLAYER_4']
+        }
+        outfit_color = player_colors.get(player_num, COLORS['PLAYER_1'])
+
+        # Scale dimensions
+        size = int(16 * scale)
+
+        # Body
+        body_rect = pygame.Rect(x - size // 2, y, size, int(size * 1.2))
+        pygame.draw.rect(surface, outfit_color, body_rect)
+        pygame.draw.rect(surface, tuple(max(0, c - 40) for c in outfit_color), body_rect, 1)
+
+        # Head
+        head_y = y - size // 2
+        pygame.draw.circle(surface, COLORS['SKIN'], (x, head_y), size // 2)
+        pygame.draw.circle(surface, tuple(max(0, c - 30) for c in COLORS['SKIN']), (x, head_y), size // 2, 1)
+
+        # Simple face
+        # Eyes
+        pygame.draw.circle(surface, (0, 0, 0), (x - size // 4, head_y - 2), 1)
+        pygame.draw.circle(surface, (0, 0, 0), (x + size // 4, head_y - 2), 1)
+
+        # Player number badge
+        badge_surf = pygame.Surface((12, 8), pygame.SRCALPHA)
+        pygame.draw.rect(badge_surf, (255, 255, 255, 200), (0, 0, 12, 8))
+        pygame.draw.rect(badge_surf, (0, 0, 0), (0, 0, 12, 8), 1)
+
+        num_text = self.small_font.render(str(player_num), True, (0, 0, 0))
+        badge_surf.blit(num_text, (3, -2))
+        surface.blit(badge_surf, (x - 6, y + int(size * 1.2) + 2))
+
+    def draw_mini_heart(self, surface, x, y, color):
+        """Draw a small heart icon"""
+        size = 6
+        # Heart shape - two circles and triangle
+        pygame.draw.circle(surface, color, (x - 2, y - 1), 2)
+        pygame.draw.circle(surface, color, (x + 2, y - 1), 2)
+        points = [(x - 3, y), (x + 3, y), (x, y + 4)]
+        pygame.draw.polygon(surface, color, points)
+
+    def draw_mini_bomb(self, surface, x, y, color):
+        """Draw a small bomb icon"""
+        # Bomb body
+        pygame.draw.circle(surface, color, (x, y + 2), 3)
+        # Fuse
+        pygame.draw.line(surface, color, (x, y - 1), (x - 2, y - 3), 1)
+        # Spark
+        pygame.draw.circle(surface, (255, 200, 0), (x - 2, y - 3), 1)
+
+    def draw_ability_powerup_icon(self, surface, x, y, ability):
+        """Draw proper powerup icons for abilities"""
+        size = 12
+
+        # Map abilities to icon types and colors
+        ability_icon_map = {
+            'kick_bomb': ('boot', (255, 100, 255)),
+            'plus_bombs': ('factory', (255, 150, 100)),  # Uses our new factory icon
+            'phased': ('ghost', (200, 200, 255)),
+            'freeze_bomb': ('freeze', (150, 200, 255)),
+            'repeat_bombs': ('factory', COLORS['TEXT_GOLD']),  # Also uses factory icon
+        }
+
+        if ability in ability_icon_map:
+            icon_type, color = ability_icon_map[ability]
+            icon_surf = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
+            self.draw_custom_icon(icon_surf, icon_type, size, size, size, color)
+            surface.blit(icon_surf, (x - size, y - size))
+
+    def draw_powerups_panel(self):
+        """Draw power-ups panel below the map"""
+        self.powerup_panel_surface.fill(COLORS['UI_BACKGROUND'])
+
+        # Title
+        title_y = 15
+        title_text = "POWER-UPS"
+        title_shadow = self.title_font.render(title_text, True, COLORS['TEXT_SHADOW'])
+        title_main = self.title_font.render(title_text, True, COLORS['TEXT_GOLD'])
+
+        self.powerup_panel_surface.blit(title_shadow, (22, title_y + 2))
+        self.powerup_panel_surface.blit(title_main, (20, title_y))
+
+        # Power-ups in horizontal layout
+        start_x = 30
+        start_y = 50  
         powerup_data = [
             ("lightning", "LIGHTNING SPEED", "move_speed", COLORS['TEXT_CYAN']),
             ("remote", "REMOTE DETONATOR", "remote_ignition", COLORS['TEXT_ORANGE']),
@@ -637,85 +894,80 @@ class EnhancedMapVisualizer:
             ("freeze", "FREEZE BOMB", "freeze_bomb", (150, 200, 255))
         ]
 
+        items_per_row = 3
+        item_width = (WINDOW_WIDTH - 60) // items_per_row
+        row_height = 25  # Height per row
+
         for i, (icon_type, name, powerup_type, color) in enumerate(powerup_data):
-            y_pos = start_y + i * 55
+            row = i // items_per_row
+            col = i % items_per_row
 
-            if y_pos < WINDOW_HEIGHT - 60:
-                # Animated background for power-up
-                bg_alpha = int(30 + 20 * math.sin(self.time * 2 + i * 0.5))
-                bg_surf = pygame.Surface((260, 45), pygame.SRCALPHA)
+            x_pos = start_x + col * item_width
+            y_pos = start_y + row * row_height
 
-                # Gradient background
-                bg_color1 = (*color[:3], bg_alpha) if len(color) >= 3 else (*color, bg_alpha)
-                bg_color2 = (max(0, color[0] - 50), max(0, color[1] - 50), max(0, color[2] - 50), bg_alpha // 2)
+            if y_pos < POWERUP_PANEL_HEIGHT - 25:
+                # Animated background
+                bg_alpha = int(20 + 15 * math.sin(self.time * 2 + i * 0.3))
+                bg_width = item_width - 10
+                bg_surf = pygame.Surface((bg_width, 20), pygame.SRCALPHA)
 
-                # Create gradient effect
-                for y in range(45):
-                    ratio = y / 45
-                    r = int(bg_color1[0] * (1 - ratio) + bg_color2[0] * ratio)
-                    g = int(bg_color1[1] * (1 - ratio) + bg_color2[1] * ratio)
-                    b = int(bg_color1[2] * (1 - ratio) + bg_color2[2] * ratio)
-                    a = int(bg_color1[3] * (1 - ratio) + bg_color2[3] * ratio) if len(bg_color1) > 3 else bg_alpha
-                    pygame.draw.line(bg_surf, (r, g, b, a), (0, y), (260, y))
+                for y in range(20):
+                    ratio = y / 20
+                    alpha = int(bg_alpha * (1 - ratio * 0.5))
+                    bg_color = (*color[:3], alpha)
+                    pygame.draw.line(bg_surf, bg_color, (0, y), (bg_width, y))
 
-                self.screen.blit(bg_surf, (MAP_SIZE * TILE_SIZE + 15, y_pos - 5))
+                self.powerup_panel_surface.blit(bg_surf, (x_pos - 5, y_pos - 5))
 
-                # Animated icon
-                icon_scale = 1.0 + 0.1 * math.sin(self.time * 4 + i)
-                icon_size = int(20 * icon_scale)
+                # Icon
+                icon_scale = 0.8 + 0.1 * math.sin(self.time * 3 + i)
+                icon_size = int(12 * icon_scale)
 
-                # Draw icon with glow
-                icon_surf = pygame.Surface((40, 40), pygame.SRCALPHA)
+                icon_surf = pygame.Surface((24, 24), pygame.SRCALPHA)
+                self.draw_custom_icon(icon_surf, icon_type, 12, 12, icon_size, color)
+                self.powerup_panel_surface.blit(icon_surf, (x_pos, y_pos - 2))
 
-                # Icon glow effect
-                glow_size = int(30 + 8 * math.sin(self.time * 3 + i))
-                for r in range(glow_size, 0, -3):
-                    glow_alpha = int(40 * (r / glow_size))
-                    if glow_alpha > 0:
-                        glow_circle = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
-                        pygame.draw.circle(glow_circle, (*color[:3], glow_alpha), (r, r), r)
-                        icon_surf.blit(glow_circle, (20 - r, 20 - r))
+                # Name
+                name_text = self.small_font.render(name, True, color)
+                self.powerup_panel_surface.blit(name_text, (x_pos + 30, y_pos))
 
-                # Draw the icon
-                self.draw_custom_icon(icon_surf, icon_type, 20, 20, icon_size, color)
-
-                self.screen.blit(icon_surf, (MAP_SIZE * TILE_SIZE + 25, y_pos - 5))
-
-                # Power-up name
-                name_color = color
-                name_text = self.powerup_font.render(name, True, name_color)
-
-                # Text shadow
-                shadow_text = self.powerup_font.render(name, True, COLORS['TEXT_SHADOW'])
-                self.screen.blit(shadow_text, (MAP_SIZE * TILE_SIZE + 72, y_pos + 12))
-
-                # Main text
-                self.screen.blit(name_text, (MAP_SIZE * TILE_SIZE + 70, y_pos + 10))
-
-                # Animated underline
-                underline_width = int(name_text.get_width() * (0.8 + 0.2 * math.sin(self.time * 5 + i)))
-                if underline_width > 0:
-                    underline_surf = pygame.Surface((underline_width, 2), pygame.SRCALPHA)
-                    underline_alpha = int(100 + 50 * math.sin(self.time * 4 + i))
-                    pygame.draw.rect(underline_surf, (*color[:3], underline_alpha), (0, 0, underline_width, 2))
-                    self.screen.blit(underline_surf, (MAP_SIZE * TILE_SIZE + 70, y_pos + 30))
+        # Blit to virtual surface
+        self.virtual_surface.blit(self.powerup_panel_surface, (0, POWERUP_OFFSET_Y))
 
     def handle_events(self):
-        """Enhanced event handling"""
+        """Enhanced event handling with new layout and resizing"""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return False
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     return False
+            elif event.type == pygame.VIDEORESIZE:
+                self.handle_window_resize(event.w, event.h)
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Left click
                     mouse_x, mouse_y = pygame.mouse.get_pos()
 
-                    # Check if click is within map area
-                    if mouse_x < MAP_SIZE * TILE_SIZE and mouse_y < MAP_SIZE * TILE_SIZE:
-                        tile_x = mouse_y // TILE_SIZE
-                        tile_y = mouse_x // TILE_SIZE
+                    # Calculate the offset of the scaled content on screen
+                    scaled_width = int(WINDOW_WIDTH * self.scale_factor)
+                    scaled_height = int(WINDOW_HEIGHT * self.scale_factor)
+                    x_offset = (self.current_width - scaled_width) // 2
+                    y_offset = (self.current_height - scaled_height) // 2
+
+                    # Convert screen coordinates to virtual coordinates
+                    virtual_x = (mouse_x - max(0, x_offset)) / self.scale_factor
+                    virtual_y = (mouse_y - max(0, y_offset)) / self.scale_factor
+
+                    # Check if click is within map area (accounting for new position)
+                    if (MAP_OFFSET_X <= virtual_x < MAP_OFFSET_X + MAP_SIZE * TILE_SIZE and
+                            MAP_OFFSET_Y <= virtual_y < MAP_OFFSET_Y + MAP_SIZE * TILE_SIZE):
+
+                        # Adjust mouse coordinates relative to map
+                        map_mouse_x = virtual_x - MAP_OFFSET_X
+                        map_mouse_y = virtual_y - MAP_OFFSET_Y
+
+                        tile_x = map_mouse_y // TILE_SIZE
+                        tile_y = map_mouse_x // TILE_SIZE
 
                         if 0 <= tile_x < MAP_SIZE and 0 <= tile_y < MAP_SIZE:
                             self.selected_tile = (tile_x, tile_y)
@@ -731,21 +983,38 @@ class EnhancedMapVisualizer:
         return True
 
     def run(self):
-        """main game loop"""
-        print("🎮 Plaing with Fire 2 Map Visualizer Started!")
-        print("🖱️ Click tiles to inspect | ESC to exit")
+        """main game loop with scaling support"""
+        print("🎮 Playing with Fire 2 Map Visualizer Started!")
+        print("🖱️ Click tiles to inspect | ESC to exit | Resize window as needed")
 
         running = True
         while running:
             running = self.handle_events()
 
-            # Clear screen with gradient background
+            # Clear virtual surface with gradient background
             bg_rect = pygame.Rect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT)
-            self.draw_gradient_rect(self.screen, COLORS['BACKGROUND'], COLORS['PANEL_BG'], bg_rect)
+            self.draw_gradient_rect(self.virtual_surface, COLORS['BACKGROUND'], COLORS['PANEL_BG'], bg_rect)
 
-            # Draw enhanced map and UI
-            self.draw_enhanced_map()
-            self.draw_enhanced_ui()
+            # Draw enhanced map and UI to virtual surface
+            self.draw_enhanced_map()  # Map on the right
+            self.draw_player_stats_panel()  # Player stats on the left
+            self.draw_powerups_panel()  # Power-ups below the map
+
+            # Scale virtual surface to actual screen
+            if self.scale_factor != 1.0:
+                scaled_width = int(WINDOW_WIDTH * self.scale_factor)
+                scaled_height = int(WINDOW_HEIGHT * self.scale_factor)
+                scaled_surface = pygame.transform.scale(self.virtual_surface, (scaled_width, scaled_height))
+            else:
+                scaled_surface = self.virtual_surface
+
+            # Clear screen and center the scaled content
+            self.screen.fill(COLORS['BACKGROUND'])
+
+            # Center the content on screen
+            x_offset = (self.current_width - scaled_surface.get_width()) // 2
+            y_offset = (self.current_height - scaled_surface.get_height()) // 2
+            self.screen.blit(scaled_surface, (max(0, x_offset), max(0, y_offset)))
 
             pygame.display.flip()
             self.clock.tick(FPS)
