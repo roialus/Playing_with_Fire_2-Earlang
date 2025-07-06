@@ -1,16 +1,16 @@
 -module(map_generator).
 
 -export([generate_map/0, generate_map/1, generate_map_with_powerups/0, generate_map_with_powerups/1,
-         visualize_map/1, get_tile_at/3, export_map/2, export_map_with_powerups/2, test_generation/0]).
+         visualize_map/1, get_cell_at/3, export_map/2, test_generation/0]).
 
-%% Tile type definitions
--define(FREE, 0).         % Free spot (no tile) - walkable
--define(BREAKABLE, 1).    % Breakable tile - destructible in 1 explosion
--define(UNBREAKABLE, 2).  % Unbreakable wall - permanent obstacle
--define(STRONG, 3).       % Strong tile - needs 2 explosions to break
--define(PLAYER_START, 4). % Player starting position
+%% Tile type definitions (now atoms)
+-define(FREE, free).
+-define(BREAKABLE, breakable).
+-define(UNBREAKABLE, unbreakable).
+-define(STRONG, strong).
+-define(PLAYER_START, player_start).
 
-%% Power-up definitions
+%% Power-up definitions (atoms)
 -define(NO_POWERUP, none).
 -define(MOVE_SPEED, move_speed).
 -define(REMOTE_IGNITION, remote_ignition).
@@ -22,12 +22,28 @@
 -define(PLUS_LIFE, plus_life).
 -define(FREEZE_BOMB, freeze_bomb).
 
+%% Bomb type definitions (atoms)
+-define(NO_BOMB, none).
+-define(NORMAL_BOMB, normal_bomb).
+-define(REMOTE_BOMB, remote_bomb).
+-define(FREEZE_BOMB_ITEM, freeze_bomb_item).
+
+%% Player ID definitions (atoms)
+-define(NO_PLAYER, none).
+-define(PLAYER_1, player_1).
+-define(PLAYER_2, player_2).
+-define(PLAYER_3, player_3).
+-define(PLAYER_4, player_4).
+
 -define(MAP_SIZE, 16).
+
+%% Grid cell structure: {TileType, PowerupType, BombType, PlayerID}
+-define(EMPTY_CELL, {?FREE, ?NO_POWERUP, ?NO_BOMB, ?NO_PLAYER}).
+-define(UNBREAKABLE_CELL, {?UNBREAKABLE, ?NO_POWERUP, ?NO_BOMB, ?NO_PLAYER}).
 
 -record(map_state, {
     size = ?MAP_SIZE,
-    grid,
-    powerup_grid,  % Stores power-up information for each tile
+    grid,  % Single grid with tuples: {tile_type, powerup_type, bomb_type, player_id}
     corners = [{1, 1}, {1, 14}, {14, 1}, {14, 14}],
     steiner_paths = [],
     statistics = #{} % Tracks tile and power-up counts
@@ -158,15 +174,10 @@ generate_map_with_powerups(Options) ->
 %% ===================================================================
 
 initialize_map() ->
-    % Create 16x16 grid filled with FREE spots
-    Grid = array:new(?MAP_SIZE, {default, ?FREE}),
+    % Create 16x16 grid filled with empty cells
+    Grid = array:new(?MAP_SIZE, {default, ?EMPTY_CELL}),
     EmptyGrid = array:map(fun(_, _) -> 
-        array:new(?MAP_SIZE, {default, ?FREE}) 
-    end, Grid),
-    
-    % Create power-up grid (same structure)
-    PowerupGrid = array:map(fun(_, _) -> 
-        array:new(?MAP_SIZE, {default, ?NO_POWERUP}) 
+        array:new(?MAP_SIZE, {default, ?EMPTY_CELL}) 
     end, Grid),
     
     % Set borders to UNBREAKABLE
@@ -190,20 +201,20 @@ initialize_map() ->
         powerup_locations => []
     },
     
-    #map_state{grid = ClearGrid, powerup_grid = PowerupGrid, statistics = Stats}.
+    #map_state{grid = ClearGrid, statistics = Stats}.
 
 set_borders(Grid) ->
     % Set top and bottom borders
-    TopRow = array:new(?MAP_SIZE, {default, ?UNBREAKABLE}), 
-    BottomRow = array:new(?MAP_SIZE, {default, ?UNBREAKABLE}),
+    TopRow = array:new(?MAP_SIZE, {default, ?UNBREAKABLE_CELL}), 
+    BottomRow = array:new(?MAP_SIZE, {default, ?UNBREAKABLE_CELL}),
     
     Grid1 = array:set(0, TopRow, Grid),
     Grid2 = array:set(?MAP_SIZE - 1, BottomRow, Grid1),
     
     % Set left and right borders
     array:map(fun(X, Row) when X > 0, X < ?MAP_SIZE - 1 ->
-        Row1 = array:set(0, ?UNBREAKABLE, Row), 
-        array:set(?MAP_SIZE - 1, ?UNBREAKABLE, Row1);
+        Row1 = array:set(0, ?UNBREAKABLE_CELL, Row), 
+        array:set(?MAP_SIZE - 1, ?UNBREAKABLE_CELL, Row1);
     (_, Row) -> Row
     end, Grid2).
 
@@ -219,7 +230,7 @@ clear_player_areas(Grid) ->
                 case is_valid_position(X, Y) of
                     true ->
                         Row = array:get(X, Grid2),
-                        NewRow = array:set(Y, ?FREE, Row),
+                        NewRow = array:set(Y, ?EMPTY_CELL, Row),
                         array:set(X, NewRow, Grid2);
                     false -> Grid2
                 end
@@ -262,14 +273,33 @@ is_number_in_range(Num, Numbers) when is_list(Numbers) ->
 is_number_in_range(_, _) -> false.
 
 %% ===================================================================
-%% Enhanced Tile Setting with Power-ups and Statistics
+%% Enhanced Cell Setting with Unified Grid
 %% ===================================================================
 
-set_tile_with_powerup(MapState, X, Y, TileType) ->
+set_cell(MapState, X, Y, TileType) ->
+    set_cell(MapState, X, Y, TileType, ?NO_POWERUP, ?NO_BOMB, ?NO_PLAYER).
+
+set_cell(MapState, X, Y, TileType, PowerupType, BombType, PlayerID) ->
     Grid = MapState#map_state.grid,
-    PowerupGrid = MapState#map_state.powerup_grid,
     Stats = MapState#map_state.statistics,
     
+    % Create new cell
+    NewCell = {TileType, PowerupType, BombType, PlayerID},
+    
+    % Update grid
+    Row = array:get(X, Grid),
+    NewRow = array:set(Y, NewCell, Row),
+    NewGrid = array:set(X, NewRow, Grid),
+    
+    % Update statistics
+    NewStats = update_statistics(Stats, TileType, PowerupType, X, Y),
+    
+    MapState#map_state{
+        grid = NewGrid,
+        statistics = NewStats
+    }.
+
+set_cell_with_powerup(MapState, X, Y, TileType) ->
     % Determine power-up based on tile type
     Powerup = case TileType of
         ?BREAKABLE -> select_powerup_for_breakable();
@@ -277,34 +307,35 @@ set_tile_with_powerup(MapState, X, Y, TileType) ->
         _ -> ?NO_POWERUP
     end,
     
-    % Update grids
-    Row = array:get(X, Grid),
-    NewRow = array:set(Y, TileType, Row),
-    NewGrid = array:set(X, NewRow, Grid),
-    
-    PowerupRow = array:get(X, PowerupGrid),
-    NewPowerupRow = array:set(Y, Powerup, PowerupRow),
-    NewPowerupGrid = array:set(X, NewPowerupRow, PowerupGrid),
-    
-    % Update statistics
-    NewStats = update_statistics(Stats, TileType, Powerup, X, Y),
-    
-    MapState#map_state{
-        grid = NewGrid,
-        powerup_grid = NewPowerupGrid,
-        statistics = NewStats
-    }.
+    set_cell(MapState, X, Y, TileType, Powerup, ?NO_BOMB, ?NO_PLAYER).
+
+%% Helper functions to work with cells
+get_tile_type({TileType, _, _, _}) -> TileType.
+get_powerup_type({_, PowerupType, _, _}) -> PowerupType.
+get_bomb_type({_, _, BombType, _}) -> BombType.
+get_player_id({_, _, _, PlayerID}) -> PlayerID.
+
+%% Update cell components
+update_tile_type({_, PowerupType, BombType, PlayerID}, NewTileType) ->
+    {NewTileType, PowerupType, BombType, PlayerID}.
+
+update_powerup_type({TileType, _, BombType, PlayerID}, NewPowerupType) ->
+    {TileType, NewPowerupType, BombType, PlayerID}.
+
+update_bomb_type({TileType, PowerupType, _, PlayerID}, NewBombType) ->
+    {TileType, PowerupType, NewBombType, PlayerID}.
+
+update_player_id({TileType, PowerupType, BombType, _}, NewPlayerID) ->
+    {TileType, PowerupType, BombType, NewPlayerID}.
 
 update_statistics(Stats, TileType, Powerup, X, Y) ->
     % Update tile counts
     TileCounts = maps:get(tile_counts, Stats),
-    TileKey = tile_type_to_key(TileType),
-    NewTileCounts = maps:update_with(TileKey, fun(Count) -> Count + 1 end, 1, TileCounts),
+    NewTileCounts = maps:update_with(TileType, fun(Count) -> Count + 1 end, 1, TileCounts),
     
     % Update power-up counts
     PowerupCounts = maps:get(powerup_counts, Stats),
-    PowerupKey = powerup_to_key(Powerup),
-    NewPowerupCounts = maps:update_with(PowerupKey, fun(Count) -> Count + 1 end, 1, PowerupCounts),
+    NewPowerupCounts = maps:update_with(Powerup, fun(Count) -> Count + 1 end, 1, PowerupCounts),
     
     % Update power-up locations
     PowerupLocations = maps:get(powerup_locations, Stats),
@@ -318,23 +349,6 @@ update_statistics(Stats, TileType, Powerup, X, Y) ->
         powerup_counts => NewPowerupCounts,
         powerup_locations => NewPowerupLocations
     }.
-
-tile_type_to_key(?FREE) -> free;
-tile_type_to_key(?BREAKABLE) -> breakable;
-tile_type_to_key(?UNBREAKABLE) -> unbreakable;
-tile_type_to_key(?STRONG) -> strong;
-tile_type_to_key(?PLAYER_START) -> player_start.
-
-powerup_to_key(?NO_POWERUP) -> none;
-powerup_to_key(?MOVE_SPEED) -> move_speed;
-powerup_to_key(?REMOTE_IGNITION) -> remote_ignition;
-powerup_to_key(?REPEAT_BOMBS) -> repeat_bombs;
-powerup_to_key(?KICK_BOMB) -> kick_bomb;
-powerup_to_key(?PHASED) -> phased;
-powerup_to_key(?PLUS_BOMBS) -> plus_bombs;
-powerup_to_key(?BIGGER_EXPLOSION) -> bigger_explosion;
-powerup_to_key(?PLUS_LIFE) -> plus_life;
-powerup_to_key(?FREEZE_BOMB) -> freeze_bomb.
 
 %% ===================================================================
 %% Graph Creation for Steiner Tree (unchanged)
@@ -458,7 +472,7 @@ extract_steiner_paths(SteinerEdges) ->
     lists:usort(lists:flatten(SteinerEdges)).
 
 %% ===================================================================
-%% Apply Steiner Tree to Map (Enhanced with Power-ups)
+%% Apply Steiner Tree to Map (Enhanced with unified grid)
 %% ===================================================================
 
 apply_steiner_tree(MapState, SteinerPaths, BreakableChance) ->
@@ -470,7 +484,7 @@ apply_steiner_tree(MapState, SteinerPaths, BreakableChance) ->
                     true -> ?BREAKABLE;
                     false -> ?FREE
                 end,
-                set_tile_with_powerup(AccMapState, X, Y, TileType);
+                set_cell_with_powerup(AccMapState, X, Y, TileType);
             false ->
                 AccMapState
         end
@@ -483,7 +497,7 @@ is_in_player_area(X, Y) ->
     end, Corners).
 
 %% ===================================================================
-%% Fill Remaining Areas (Enhanced with Power-ups)
+%% Fill Remaining Areas (Enhanced with unified grid)
 %% ===================================================================
 
 fill_remaining_areas(MapState, Options) ->
@@ -499,7 +513,7 @@ fill_remaining_areas(MapState, Options) ->
     % Fill with random tile types
     lists:foldl(fun({X, Y}, AccMapState) ->
         TileType = select_random_tile_type(BreakableProb, StrongProb, UnbreakableProb),
-        set_tile_with_powerup(AccMapState, X, Y, TileType)
+        set_cell_with_powerup(AccMapState, X, Y, TileType)
     end, MapState, AvailablePositions).
 
 get_available_positions(SteinerPaths) ->
@@ -522,15 +536,16 @@ select_random_tile_type(BreakableProb, StrongProb, UnbreakableProb) ->
     end.
 
 %% ===================================================================
-%% Mark Player Starts (Enhanced with Statistics)
+%% Mark Player Starts (Enhanced with unified grid)
 %% ===================================================================
 
 mark_player_starts(MapState) ->
     Corners = [{1, 1}, {1, 14}, {14, 1}, {14, 14}],
+    PlayerIDs = [?PLAYER_1, ?PLAYER_2, ?PLAYER_3, ?PLAYER_4],
     
-    lists:foldl(fun({X, Y}, AccMapState) ->
-        set_tile_with_powerup(AccMapState, X, Y, ?PLAYER_START)
-    end, MapState, Corners).
+    lists:foldl(fun({{X, Y}, PlayerID}, AccMapState) ->
+        set_cell(AccMapState, X, Y, ?PLAYER_START, ?NO_POWERUP, ?NO_BOMB, PlayerID)
+    end, MapState, lists:zip(Corners, PlayerIDs)).
 
 %% ===================================================================
 %% Statistics Display
@@ -559,11 +574,7 @@ print_statistics(MapState) ->
     io:format("~n📍 POWER-UP LOCATIONS:~n"),
     SortedLocations = lists:sort(PowerupLocations),
     lists:foreach(fun({Powerup, X, Y, TileType}) ->
-        TileStr = case TileType of
-            ?BREAKABLE -> "BREAKABLE";
-            ?STRONG -> "STRONG";
-            _ -> "OTHER"
-        end,
+        TileStr = atom_to_list(TileType),
         io:format("  ~15s at (~2w,~2w) in ~s tile~n", 
                  [atom_to_list(Powerup), X, Y, TileStr])
     end, SortedLocations),
@@ -571,30 +582,37 @@ print_statistics(MapState) ->
     io:format("~n").
 
 %% ===================================================================
-%% Utility Functions (Enhanced)
+%% Utility Functions (Enhanced for unified grid)
 %% ===================================================================
 
-%% Get the tile type at specific coordinates
-get_tile_at(Grid, X, Y) ->
+%% Get the complete cell at specific coordinates
+get_cell_at(Grid, X, Y) ->
     case X >= 0 andalso X < ?MAP_SIZE andalso Y >= 0 andalso Y < ?MAP_SIZE of
         true ->
             Row = array:get(X, Grid),
             array:get(Y, Row);
         false ->
-            ?UNBREAKABLE % Out of bounds
+            ?UNBREAKABLE_CELL % Out of bounds
     end.
 
-%% Get the power-up at specific coordinates
-get_powerup_at(PowerupGrid, X, Y) ->
-    case X >= 0 andalso X < ?MAP_SIZE andalso Y >= 0 andalso Y < ?MAP_SIZE of
-        true ->
-            Row = array:get(X, PowerupGrid),
-            array:get(Y, Row);
-        false ->
-            ?NO_POWERUP % Out of bounds
-    end.
+%% Get specific components from cell
+get_tile_at(Grid, X, Y) ->
+    Cell = get_cell_at(Grid, X, Y),
+    get_tile_type(Cell).
 
-%% Enhanced visualization with power-ups
+get_powerup_at(Grid, X, Y) ->
+    Cell = get_cell_at(Grid, X, Y),
+    get_powerup_type(Cell).
+
+get_bomb_at(Grid, X, Y) ->
+    Cell = get_cell_at(Grid, X, Y),
+    get_bomb_type(Cell).
+
+get_player_at(Grid, X, Y) ->
+    Cell = get_cell_at(Grid, X, Y),
+    get_player_id(Cell).
+
+%% Enhanced visualization with complete cell information
 visualize_map(Grid) ->
     io:format("~n🗺️  Generated Map (~wx~w):~n", [?MAP_SIZE, ?MAP_SIZE]),
     io:format("   "),
@@ -605,82 +623,58 @@ visualize_map(Grid) ->
         io:format("~2w ", [X]),
         Row = array:get(X, Grid),
         lists:foreach(fun(Y) ->
-            Tile = array:get(Y, Row),
-            Char = case Tile of
-                ?FREE -> " .";
-                ?BREAKABLE -> " *";
-                ?UNBREAKABLE -> " #";
-                ?STRONG -> " +";     
-                ?PLAYER_START -> " P"
+            Cell = array:get(Y, Row),
+            {TileType, PowerupType, BombType, PlayerID} = Cell,
+            
+            % Primary display based on tile type, but show other info if present
+            Char = case {TileType, BombType, PlayerID} of
+                {_, ?NORMAL_BOMB, _} -> " B";        % Bomb takes priority
+                {_, ?REMOTE_BOMB, _} -> " R";        % Remote bomb
+                {_, ?FREEZE_BOMB_ITEM, _} -> " F";   % Freeze bomb
+                {_, _, ?PLAYER_1} -> " 1";           % Player 1
+                {_, _, ?PLAYER_2} -> " 2";           % Player 2
+                {_, _, ?PLAYER_3} -> " 3";           % Player 3
+                {_, _, ?PLAYER_4} -> " 4";           % Player 4
+                {?FREE, _, _} -> case PowerupType of
+                    ?NO_POWERUP -> " .";
+                    _ -> " o"  % Show power-up on free space
+                end;
+                {?BREAKABLE, _, _} -> " *";
+                {?UNBREAKABLE, _, _} -> " #";
+                {?STRONG, _, _} -> " +";     
+                {?PLAYER_START, _, _} -> " P"
             end,
             io:format("~s", [Char])
         end, lists:seq(0, ?MAP_SIZE - 1)),
         io:format("~n")
     end, lists:seq(0, ?MAP_SIZE - 1)),
     
-    io:format("~nLegend: . = Free, * = Breakable, # = Unbreakable, + = Strong, P = Player~n").
+    io:format("~nLegend:~n"),
+    io:format("  . = Free, * = Breakable, # = Unbreakable, + = Strong, P = Player Start~n"),
+    io:format("  o = Power-up, B = Bomb, R = Remote Bomb, F = Freeze Bomb~n"),
+    io:format("  1-4 = Players~n").
 
 %% ===================================================================
-%% Export Map to Erlang Module (Enhanced)
+%% Export Map to Erlang Module (Enhanced for unified grid)
 %% ===================================================================
+
 export_map(Grid, Filename) ->
     {ok, File} = file:open(Filename, [write]),
     
     % Write header
-    io:format(File, "%% Generated 16x16 Bomberman Map with Power-ups~n", []),
+    io:format(File, "%% Generated 16x16 Bomberman Map with Unified Grid~n", []),
     io:format(File, "-module(~s).~n", [filename:basename(Filename, ".erl")]),
-    io:format(File, "-export([get_map/0, get_tile_type/2, get_player_starts/0]).~n~n", []),
+    io:format(File, "-export([get_map/0, get_cell_at/2, get_tile_at/2, get_powerup_at/2, get_bomb_at/2, get_player_at/2, get_player_starts/0]).~n~n", []),
     
-    % Write tile definitions
-    io:format(File, "-define(FREE, 0).~n", []),
-    io:format(File, "-define(BREAKABLE, 1).~n", []),
-    io:format(File, "-define(UNBREAKABLE, 2).~n", []),
-    io:format(File, "-define(STRONG, 3).~n", []),
-    io:format(File, "-define(PLAYER_START, 4).~n~n", []),
+    % Write atom definitions
+    io:format(File, "%% Tile type atoms~n", []),
+    io:format(File, "-define(FREE, free).~n", []),
+    io:format(File, "-define(BREAKABLE, breakable).~n", []),
+    io:format(File, "-define(UNBREAKABLE, unbreakable).~n", []),
+    io:format(File, "-define(STRONG, strong).~n", []),
+    io:format(File, "-define(PLAYER_START, player_start).~n~n", []),
     
-    % Write map data
-    io:format(File, "get_map() ->~n    [~n", []),
-    lists:foreach(fun(X) ->
-        Row = array:get(X, Grid),
-        RowList = [array:get(Y, Row) || Y <- lists:seq(0, ?MAP_SIZE - 1)],
-        RowStr = string:join([integer_to_list(T) || T <- RowList], ", "),
-        Comma = if X < ?MAP_SIZE - 1 -> ","; true -> "" end,
-        io:format(File, "        [~s]~s~n", [RowStr, Comma])
-    end, lists:seq(0, ?MAP_SIZE - 1)),
-    io:format(File, "    ].~n~n", []),
-    
-    % Write helper functions
-    io:format(File, "get_tile_type(X, Y) when X >= 0, X < 16, Y >= 0, Y < 16 ->~n", []),
-    io:format(File, "    Map = get_map(),~n", []),
-    io:format(File, "    Row = lists:nth(X + 1, Map),~n", []),
-    io:format(File, "    lists:nth(Y + 1, Row).~n~n", []),
-    
-    io:format(File, "get_player_starts() ->~n", []),
-    io:format(File, "    [{player_1, 1, 1}, {player_2, 1, 14}, {player_3, 14, 1}, {player_4, 14, 14}].~n", []),
-    
-    file:close(File),
-    io:format("📄 Map exported to ~s~n", [Filename]).
-
-%% Enhanced export with power-up information
-export_map_with_powerups(MapState, Filename) ->
-    {ok, File} = file:open(Filename, [write]),
-    
-    Grid = MapState#map_state.grid,
-    PowerupGrid = MapState#map_state.powerup_grid,
-    
-    % Write header
-    io:format(File, "%% Generated 16x16 Bomberman Map with Power-ups~n", []),
-    io:format(File, "-module(~s).~n", [filename:basename(Filename, ".erl")]),
-    io:format(File, "-export([get_map/0, get_powerup_map/0, get_tile_type/2, get_powerup_at/2, get_player_starts/0]).~n~n", []),
-    
-    % Write tile definitions
-    io:format(File, "-define(FREE, 0).~n", []),
-    io:format(File, "-define(BREAKABLE, 1).~n", []),
-    io:format(File, "-define(UNBREAKABLE, 2).~n", []),
-    io:format(File, "-define(STRONG, 3).~n", []),
-    io:format(File, "-define(PLAYER_START, 4).~n~n", []),
-    
-    % Write power-up definitions
+    io:format(File, "%% Power-up atoms~n", []),
     io:format(File, "-define(NO_POWERUP, none).~n", []),
     io:format(File, "-define(MOVE_SPEED, move_speed).~n", []),
     io:format(File, "-define(REMOTE_IGNITION, remote_ignition).~n", []),
@@ -692,86 +686,91 @@ export_map_with_powerups(MapState, Filename) ->
     io:format(File, "-define(PLUS_LIFE, plus_life).~n", []),
     io:format(File, "-define(FREEZE_BOMB, freeze_bomb).~n~n", []),
     
-    % Write map data
+    io:format(File, "%% Bomb type atoms~n", []),
+    io:format(File, "-define(NO_BOMB, none).~n", []),
+    io:format(File, "-define(NORMAL_BOMB, normal_bomb).~n", []),
+    io:format(File, "-define(REMOTE_BOMB, remote_bomb).~n", []),
+    io:format(File, "-define(FREEZE_BOMB_ITEM, freeze_bomb_item).~n~n", []),
+    
+    io:format(File, "%% Player ID atoms~n", []),
+    io:format(File, "-define(NO_PLAYER, none).~n", []),
+    io:format(File, "-define(PLAYER_1, player_1).~n", []),
+    io:format(File, "-define(PLAYER_2, player_2).~n", []),
+    io:format(File, "-define(PLAYER_3, player_3).~n", []),
+    io:format(File, "-define(PLAYER_4, player_4).~n~n", []),
+    
+    % Write map data (unified grid with tuples)
     io:format(File, "get_map() ->~n    [~n", []),
     lists:foreach(fun(X) ->
         Row = array:get(X, Grid),
         RowList = [array:get(Y, Row) || Y <- lists:seq(0, ?MAP_SIZE - 1)],
-        RowStr = string:join([integer_to_list(T) || T <- RowList], ", "),
-        Comma = if X < ?MAP_SIZE - 1 -> ","; true -> "" end,
-        io:format(File, "        [~s]~s~n", [RowStr, Comma])
-    end, lists:seq(0, ?MAP_SIZE - 1)),
-    io:format(File, "    ].~n~n", []),
-    
-    % Write power-up map data
-    io:format(File, "get_powerup_map() ->~n    [~n", []),
-    lists:foreach(fun(X) ->
-        Row = array:get(X, PowerupGrid),
-        RowList = [array:get(Y, Row) || Y <- lists:seq(0, ?MAP_SIZE - 1)],
-        RowStr = string:join([format_powerup_for_export(P) || P <- RowList], ", "),
+        RowStr = string:join([format_cell_for_export(Cell) || Cell <- RowList], ", "),
         Comma = if X < ?MAP_SIZE - 1 -> ","; true -> "" end,
         io:format(File, "        [~s]~s~n", [RowStr, Comma])
     end, lists:seq(0, ?MAP_SIZE - 1)),
     io:format(File, "    ].~n~n", []),
     
     % Write helper functions
-    io:format(File, "get_tile_type(X, Y) when X >= 0, X < 16, Y >= 0, Y < 16 ->~n", []),
+    io:format(File, "get_cell_at(X, Y) when X >= 0, X < 16, Y >= 0, Y < 16 ->~n", []),
     io:format(File, "    Map = get_map(),~n", []),
     io:format(File, "    Row = lists:nth(X + 1, Map),~n", []),
     io:format(File, "    lists:nth(Y + 1, Row).~n~n", []),
     
-    io:format(File, "get_powerup_at(X, Y) when X >= 0, X < 16, Y >= 0, Y < 16 ->~n", []),
-    io:format(File, "    PowerupMap = get_powerup_map(),~n", []),
-    io:format(File, "    Row = lists:nth(X + 1, PowerupMap),~n", []),
-    io:format(File, "    lists:nth(Y + 1, Row).~n~n", []),
+    io:format(File, "get_tile_at(X, Y) ->~n", []),
+    io:format(File, "    {TileType, _, _, _} = get_cell_at(X, Y),~n", []),
+    io:format(File, "    TileType.~n~n", []),
+    
+    io:format(File, "get_powerup_at(X, Y) ->~n", []),
+    io:format(File, "    {_, PowerupType, _, _} = get_cell_at(X, Y),~n", []),
+    io:format(File, "    PowerupType.~n~n", []),
+    
+    io:format(File, "get_bomb_at(X, Y) ->~n", []),
+    io:format(File, "    {_, _, BombType, _} = get_cell_at(X, Y),~n", []),
+    io:format(File, "    BombType.~n~n", []),
+    
+    io:format(File, "get_player_at(X, Y) ->~n", []),
+    io:format(File, "    {_, _, _, PlayerID} = get_cell_at(X, Y),~n", []),
+    io:format(File, "    PlayerID.~n~n", []),
     
     io:format(File, "get_player_starts() ->~n", []),
     io:format(File, "    [{player_1, 1, 1}, {player_2, 1, 14}, {player_3, 14, 1}, {player_4, 14, 14}].~n", []),
     
     file:close(File),
-    io:format("📄 Map with power-ups exported to ~s~n", [Filename]).
+    io:format("📄 Unified grid map exported to ~s~n", [Filename]).
 
-%% Helper function to format power-ups for export
-format_powerup_for_export(Powerup) ->
-    case Powerup of
-        ?NO_POWERUP -> "none";
-        ?MOVE_SPEED -> "move_speed";
-        ?REMOTE_IGNITION -> "remote_ignition";
-        ?REPEAT_BOMBS -> "repeat_bombs";
-        ?KICK_BOMB -> "kick_bomb";
-        ?PHASED -> "phased";
-        ?PLUS_BOMBS -> "plus_bombs";
-        ?BIGGER_EXPLOSION -> "bigger_explosion";
-        ?PLUS_LIFE -> "plus_life";
-        ?FREEZE_BOMB -> "freeze_bomb"
-    end.
+%% Helper function to format cells for export
+format_cell_for_export({TileType, PowerupType, BombType, PlayerID}) ->
+    io_lib:format("{~w, ~w, ~w, ~w}", [TileType, PowerupType, BombType, PlayerID]).
 
 %% ===================================================================
 %% Test Functions
 %% ===================================================================
 
 test_generation() ->
-    io:format("🧪 Testing map generation with power-ups...~n"),
+    io:format("🧪 Testing unified grid map generation...~n"),
     
     % Generate map with full state
     MapState = generate_map_with_powerups(),
     Grid = MapState#map_state.grid,
     
     % Test basic properties
-    BorderTile = get_tile_at(Grid, 0, 0),
-    CenterTile = get_tile_at(Grid, 8, 8),
-    PlayerTile = get_tile_at(Grid, 1, 1),
+    BorderCell = get_cell_at(Grid, 0, 0),
+    CenterCell = get_cell_at(Grid, 8, 8),
+    PlayerCell = get_cell_at(Grid, 1, 1),
     
-    io:format("Border tile: ~w (should be ~w)~n", [BorderTile, ?UNBREAKABLE]),
-    io:format("Player start: ~w (should be ~w)~n", [PlayerTile, ?PLAYER_START]),
-    io:format("Center area: ~w~n", [CenterTile]),
+    io:format("Border cell: ~w~n", [BorderCell]),
+    io:format("Player start: ~w~n", [PlayerCell]),
+    io:format("Center area: ~w~n", [CenterCell]),
+    
+    % Test component extraction
+    io:format("Border tile type: ~w~n", [get_tile_type(BorderCell)]),
+    io:format("Player at start: ~w~n", [get_player_id(PlayerCell)]),
     
     % Visualize
     visualize_map(Grid),
     
-    % Export both versions for testing
-    export_map(Grid, "test_map_basic.erl"),
-    export_map_with_powerups(MapState, "test_map_with_powerups.erl"),
+    % Export for testing
+    export_map(Grid, "test_unified_map.erl"),
     
-    io:format("✅ Test complete!~n"),
+    io:format("✅ Unified grid test complete!~n"),
     Grid.
