@@ -227,17 +227,3 @@ read_keyboard_input() ->
         "\e" -> escape;
         _ -> no_input
     end.
-
-%% Alternative: Non-blocking input reading
-read_keyboard_nonblocking() ->
-    % For non-blocking input
-    % Example structure
-    try
-        case io:get_chars('', 1) of
-            eof -> no_input;
-            [Char] -> list_to_atom([Char]);
-            _ -> no_input
-        end
-    catch
-        _:_ -> no_input
-    end.
