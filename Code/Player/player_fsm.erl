@@ -76,6 +76,8 @@ gn_response(PlayerPid, Response) ->
 inflict_damage(PlayerPid) ->
     gen_statem:cast(PlayerPid, inflict_damage).
 
+
+
 %%%===================================================================
 %%% gen_statem callbacks
 %%%===================================================================
