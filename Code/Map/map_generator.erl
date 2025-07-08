@@ -540,7 +540,7 @@ select_random_tile_type(BreakableProb, StrongProb, UnbreakableProb) ->
 %% ===================================================================
 
 mark_player_starts(MapState) ->
-    Corners = [{1, 1}, {1, 14}, {14, 1}, {14, 14}],
+    Corners = [{1, 1}, {14, 1}, {1, 14}, {14, 14}],
     PlayerIDs = [?PLAYER_1, ?PLAYER_2, ?PLAYER_3, ?PLAYER_4],
     
     lists:foldl(fun({{X, Y}, PlayerID}, AccMapState) ->
