@@ -8,11 +8,10 @@ import time
 # Initialize Pygame
 pygame.init()
 
-# Enhanced Constants - NEW LAYOUT - OPTIMIZED SIZE
 TILE_SIZE = 40  # Size of each tile in pixels
 MAP_SIZE = 16  # Size of the map in tiles (16x16)
 PLAYER_PANEL_WIDTH = 220  # Left panel for player stats
-POWERUP_PANEL_HEIGHT = 140  # Bottom panel for power-ups - increased height
+POWERUP_PANEL_HEIGHT = 140  # Bottom panel for power-ups
 WINDOW_WIDTH = PLAYER_PANEL_WIDTH + MAP_SIZE * TILE_SIZE + 20  # Player panel + map + margin
 WINDOW_HEIGHT = MAP_SIZE * TILE_SIZE + POWERUP_PANEL_HEIGHT + 20  # Map + power-ups + margin
 MIN_WINDOW_WIDTH = 800  # Minimum width for the window
@@ -24,7 +23,6 @@ MAP_OFFSET_X = PLAYER_PANEL_WIDTH + 10  # Map starts after player panel
 MAP_OFFSET_Y = 10  # Small top margin
 POWERUP_OFFSET_Y = MAP_OFFSET_Y + MAP_SIZE * TILE_SIZE + 10  # Power-ups below map
 
-# Professional Color Palette
 COLORS = {
     # Floor with gradient effect
     'FLOOR_LIGHT': (245, 235, 205),
@@ -150,13 +148,13 @@ class CompleteGameVisualizer:
 
         # Animation timing
         self.last_reload_check = time.time()
-        self.reload_check_interval = 0.1  # Check for file changes every 0.1 seconds for responsiveness
+        self.reload_check_interval = 0.025  # Check for file changes every 25 milliseconds for responsiveness
 
         # Load initial game state
         self.current_game_state = self.load_complete_game_state()
         self.player_stats = self.load_player_stats()
 
-        # Create surfaces for smooth rendering (will be scaled)
+        # Create surfaces for smooth rendering
         self.map_surface = pygame.Surface((MAP_SIZE * TILE_SIZE, MAP_SIZE * TILE_SIZE))
         self.player_panel_surface = pygame.Surface((PLAYER_PANEL_WIDTH, MAP_SIZE * TILE_SIZE))
         self.powerup_panel_surface = pygame.Surface((WINDOW_WIDTH, POWERUP_PANEL_HEIGHT))
@@ -233,11 +231,11 @@ class CompleteGameVisualizer:
         try:
             clean_str = data_str.strip()
 
-            # Handle list format (original simple format)
+            # Handle list format
             if clean_str.startswith('['):
                 return self.parse_erlang_list(clean_str)
 
-            # Handle tuple format (enhanced game state format)
+            # Handle tuple format
             elif clean_str.startswith('{'):
                 return self.parse_erlang_tuple_structure(clean_str)
 
@@ -250,9 +248,8 @@ class CompleteGameVisualizer:
 
     def parse_erlang_tuple_structure(self, tuple_str):
         """Parse enhanced tuple-based game state"""
-        # This would parse the enhanced format:
         # {map_data => [...], game_info => {...}, player_stats => [...]}
-        # For now, fall back to simple list parsing
+        # Fall back to simple list parsing
         return self.parse_erlang_list(tuple_str)
 
     def parse_erlang_list(self, erlang_str):
@@ -267,7 +264,7 @@ class CompleteGameVisualizer:
             elif clean_str.startswith('[') and clean_str.endswith(']'):
                 clean_str = clean_str[1:-1]
 
-            # Now we need to parse rows - each row is [tuple, tuple, tuple, ...]
+            # Each row is [tuple, tuple, tuple, ...]
             rows = []
             i = 0
 
@@ -361,7 +358,7 @@ class CompleteGameVisualizer:
             if tuple_str.startswith('{') and tuple_str.endswith('}'):
                 tuple_str = tuple_str[1:-1]
 
-            # Split by comma, but be careful about nested structures
+            # Split by comma
             parts = []
             current_part = ""
             paren_count = 0
@@ -384,7 +381,7 @@ class CompleteGameVisualizer:
 
                 current_part += char
 
-            # Don't forget the last part
+            # The last part
             if current_part.strip():
                 parts.append(current_part.strip())
 
@@ -1319,7 +1316,7 @@ class CompleteGameVisualizer:
         if death_fade < 1.0:
             outfit_color = tuple(int(c * death_fade) for c in outfit_color)
 
-        # Draw player (using existing enhanced player drawing method)
+        # Draw player
         self.draw_enhanced_player_character(surface, char_x, char_y, player_num, outfit_color)
 
         # Draw status effect overlays
@@ -1455,7 +1452,7 @@ class CompleteGameVisualizer:
         pygame.draw.polygon(surface, star_color, points)
         pygame.draw.polygon(surface, (255, 255, 255), points, 1)
 
-    # Enhanced explosion drawing methods
+    # Explosion drawing methods
     def draw_explosion_effect(self, surface, explosion):
         """Draw various types of explosion effects"""
         elapsed = self.time - explosion['start_time']
@@ -1614,7 +1611,7 @@ class CompleteGameVisualizer:
                 pygame.draw.circle(surface, (100, 255, 100, alpha),
                                    (sparkle_x, sparkle_y), sparkle_size)
 
-    # Custom icon drawing (reusing from original)
+    # Custom icon drawing
     def draw_custom_icon(self, surface, icon_type, center_x, center_y, size, color):
         """Icons for power-ups"""
         if icon_type == "lightning":
@@ -1872,12 +1869,12 @@ class CompleteGameVisualizer:
         radius_surface = self.small_font.render(radius_text, True, (255, 200, 0))
         surface.blit(radius_surface, (80, stats_start_y + stat_height * 3))
 
-        # Special abilities with actual powerup icons (only special abilities, not stat boosts)
+        # Special abilities with actual powerup icons
         abilities_text = "Abilities:"
         abilities_surface = self.small_font.render(abilities_text, True, COLORS['TEXT_WHITE'])
         surface.blit(abilities_surface, (80, stats_start_y + stat_height * 4))
 
-        # Filter to only show special abilities (not basic stat boosts)
+        # Filter to only show special abilities
         special_only_abilities = [ability for ability in stats['special_abilities']
                                   if ability in ['plus_bombs', 'repeat_bombs', 'phased', 'freeze_bomb', 'kick_bomb']]
 
@@ -2137,17 +2134,17 @@ class CompleteGameVisualizer:
             self.screen.blit(scaled_surface, (max(0, x_offset), max(0, y_offset)))
 
             # Display FPS and debug info
-            fps_text = f"FPS: {int(self.clock.get_fps())}"
-            fps_surface = self.small_font.render(fps_text, True, COLORS['TEXT_WHITE'])
-            self.screen.blit(fps_surface, (10, 10))
-
-            # Display active animation count
-            anim_count = (len(self.player_animations) + len(self.bomb_animations) +
-                          len(self.explosion_animations) + len(self.powerup_animations) +
-                          len(self.game_effects))
-            anim_text = f"Animations: {anim_count}"
-            anim_surface = self.small_font.render(anim_text, True, COLORS['TEXT_CYAN'])
-            self.screen.blit(anim_surface, (10, 30))
+            # fps_text = f"FPS: {int(self.clock.get_fps())}"
+            # fps_surface = self.small_font.render(fps_text, True, COLORS['TEXT_WHITE'])
+            # self.screen.blit(fps_surface, (10, 10))
+            #
+            # # Display active animation count
+            # anim_count = (len(self.player_animations) + len(self.bomb_animations) +
+            #               len(self.explosion_animations) + len(self.powerup_animations) +
+            #               len(self.game_effects))
+            # anim_text = f"Animations: {anim_count}"
+            # anim_surface = self.small_font.render(anim_text, True, COLORS['TEXT_CYAN'])
+            # self.screen.blit(anim_surface, (10, 30))
 
             pygame.display.flip()
             self.clock.tick(FPS)
