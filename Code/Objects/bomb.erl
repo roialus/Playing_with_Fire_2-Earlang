@@ -46,7 +46,7 @@
     movement = [0,0], % speed - [x_axi, y_axi]
     owner = none, % player name/ID (?) of whoever placed the bomb. 'none' is for a bomb that fell from a broken tile (or simply no owner)
     gn_pid, % GN Pid who oversees this process
-    original_node_ID % original creating node ID - TODO: unsure of necessity 
+    original_node_ID % original creating node ID - TODO: unsure of necessity
 }).
 
 
