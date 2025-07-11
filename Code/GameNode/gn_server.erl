@@ -59,7 +59,7 @@ init([GN_number, PlayerType]) ->
         bombs_table_name = generate_atom_table_names(GN_number, "_bombs"),
         powerups_table_name = generate_atom_table_names(GN_number, "_powerups"),
         players_table_name = generate_atom_table_names(GN_number, "_players")},
-    initialize_tiles(Data#gn_state.tiles_table_name), % todo
+    initialize_tiles(Data#gn_state.tiles_table_name),
     initialize_players(Data#gn_state.players_table_name, PlayerType), % todo
     {ok, Data}.
 
@@ -135,4 +135,4 @@ initialize_tiles(TableName) ->
         end,
     mnesia:activity(transaction, Fun).
 
-
+initialize_players(TableName, PlayerType) -> ok. % TODO
