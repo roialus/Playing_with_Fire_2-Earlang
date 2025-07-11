@@ -23,22 +23,9 @@
 
 %% Parameters Definitions
 -define(SERVER, ?MODULE).
--define(EXPLODE_DELAY, 3000).
--define(FREEZE_DELAY, 2000).
--define(TICK_DELAY, 50).
--define(HALFWAY_TILE, 350). % time to complete half the movement - the switching point between tiles
+-include("common_parameters.hrl").
+-include("object_records.hrl").
 
--record(bomb_state, {
-    type, % type of bomb - regular/remote/repeating(W.I.P - not yet implemented)
-    ignited = false, % bomb ignition status - can be false or {true, TimerRef}
-    status = normal, % normal/frozen
-    radius = 1, % radius of explosion - number means how many tiles in each direction in + shape
-    position, % location of bomb, [X,Y]
-    direction = none, % desired moving direction, can be - none/up/down/left/right
-    movement = false, % can be - false / {true, TimerRef}
-    owner, % owner of the bomb - can be none or player ID (not pid)
-    gn_pid % GN pid who oversees this process
-}).
 
 %%%===================================================================
 %%% API

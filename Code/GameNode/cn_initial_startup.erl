@@ -6,58 +6,42 @@
 %%% @end
 %%% Created : 06. Jul 2025 12:18
 %%%-------------------------------------------------------------------
--module('CN_test').
+-module(cn_initial_startup).
 -author("dolev").
 
 %% API
--export([test/2]).
+-export([test/1, connecting_nodes/1]).
 
 %% **NOTE:** when terminating, need to use application:stop(mnesia)
 
--record(mnesia_tiles, {
-    position, % position - [X,Y]
-    type, % can be - unbreakable, breakable, two_hit (-> one_hit)
-    contains  % can be - none (no power-up), bomb (that'll trigger on its own), or any speed-up
-}).
+-include("mnesia_records.hrl").
 
--record(mnesia_bombs, {
-    type, % type of bomb - regular / remote / repeating
-    ignited = false, % if not ignited - holds 'false', if ignited - holds a ref to the timer behind the self msg
-    status = normal, % can be - normal / frozen
-    time_placed, % time at which the bomb was placed, given by GN
-    radius = 1, % blast radius on a + shape - number is how many blocks away the explosion is felt
-    position, % position - [X,Y]
-    movement = [0,0], % speed - [x_axi, y_axi]
-    owner = none, % player name/ID (?) of whoever placed the bomb. 'none' is for a bomb that fell from a broken tile (or simply no owner)
-    gn_pid, % GN Pid who oversees this process
-    original_node_ID % original creating node ID - TODO: unsure of necessity
-}).
-
--record(mnesia_powerups, {
-    position, % position - [X,Y]
-    type, % type of power up - can be movement speed, extra bombs etc..
-    original_node_ID % original creating node ID - TODO: unsure of necessity
-}).
-
--record(mnesia_players, {
-    name, % placeholder
-    other,
-    stats
-}).
+%% --------------------------------------------------------------
+%% todo: for super-massive debugging use sys:trace(Pid, true).
+%% @doc connecting nodes according to an IP list
+connecting_nodes(IPList) ->
+    %% each erl shell will be called 'GN#@IP where IP is from the list.
+    IPsAsAtoms = lists:foreach(
+        fun(X) -> list_to_atom("GN" ++ integer_to_list(X) ++"@" ++ lists:nth(X, IPList)) end,
+        lists:seq(1,length(IPList))),
+    lists:map(
+        fun(IP) -> io:format("Pinging ~w : ~w~n",[IP, net_adm:ping(IP)]) end, IPsAsAtoms),
+    IPsAsAtoms.
 
 %% --------------------------------------------------------------
 
-test(NodeList, Map) ->
+test(NodeList) ->
     %% NodeList = [node(), gn_node1, gn_node2, gn_node3, gn_node4] -- THIS IS HOW THIS LIST SHOULD LOOK LIKE
+    Map = test_unified_map:get_map(),
     application:set_env(mnesia, dir, "~/Documents/mnesia_files"),
     mnesia:create_schema([NodeList]),
     rpc:multicall(NodeList, application, start, [mnesia]), % multiple nodes
-    %application:start(mnesia), % single node
+    % application:start(mnesia), % single node
 
     %% initialize mnesia tables per each game-node
     TableNamesList = lists:map(fun(X) ->
             create_tables(lists:nth(X, NodeList), node(), X)
-        end, lists:seq(1,4)),
+        end, lists:seq(1,length(NodeList))),
     mnesia:wait_for_tables(lists:flatten(TableNamesList), 5000), % timeout is 5000ms for now
     insert_map_to_database(Map),
     ok.

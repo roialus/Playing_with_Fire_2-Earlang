@@ -18,13 +18,9 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
 
--define(TICK, 50). % tick-time, delay between ticks in-game
+-include("common_parameters.hrl").
+-include("object_records.hrl").
 
--record(powerup_state, {
-    position, % position - [X,Y]
-    type, % type of power up - can be movement speed, extra bombs etc..
-    original_node_ID % original creating node ID - TODO: unsure of necessity
-}).
 
 %%%===================================================================
 %%% API
