@@ -31,7 +31,7 @@
 -include_lib("/home/dolev/Documents/Erlang_project/Code/Objects/object_records.hrl"). %% todo: need to find a way around full-path
 
 
-%%
+
 %%%===================================================================
 %%% API
 %%%===================================================================
