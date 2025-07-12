@@ -1,3 +1,7 @@
+%% ? this file isn't used, just to supress errors
+-compile(nowarn_unused_function).
+-compile(nowarn_unused_vars).
+
 %%%-------------------------------------------------------------------
 %%% @author dolev
 %%% @copyright (C) 2025, <COMPANY>
