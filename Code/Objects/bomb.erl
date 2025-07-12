@@ -58,7 +58,7 @@
 %% @doc Spawns the server and registers the local name (unique)
 -spec(start_link(Pos_x::integer, Pos_y::integer,
     Type:: 'regular'|'remote'|'repeating',
-    Time_created:: time(),
+    Time_created:: integer(),
     Optional:: list()) ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 
