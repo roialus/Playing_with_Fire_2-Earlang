@@ -44,6 +44,7 @@ test(NodeList) ->
         end, lists:seq(1,length(NodeList))),
     mnesia:wait_for_tables(lists:flatten(TableNamesList), 5000), % timeout is 5000ms for now
     insert_map_to_database(Map),
+    io:format("Initial map condioions loaded successfully to mnesia tables~n"),
     ok.
 
 
@@ -85,6 +86,8 @@ create_tables(GN_node, CN_node, Node_number) ->
         {record_name, mnesia_players},
         {type, set}
     ]),
+    io:format("CN: Initialized the following tables: ~w , ~w , ~w , ~w successfully~n",
+        [Mnesia_tiles_name,Mnesia_bombs_name, Mnesia_powerups_name, Mnesia_players_name]),
     [Mnesia_tiles_name, Mnesia_bombs_name, Mnesia_powerups_name, Mnesia_players_name].
 
 
@@ -101,14 +104,11 @@ insert_map_to_database(Map) ->
             lists:foreach(fun(Y) ->
                 {TileType, PowerupType, _BombType, PlayerID} = get_tile_content(X,Y, Map),
                 if
+                    TileType == player_start -> % player at this location
+                        init_player([X,Y], PlayerID);
                     TileType =/= free -> % tile "exists"
                         insert_tile([X,Y], TileType, PowerupType);
                     true -> ok % empty tiles aren't stored in database
-                end,
-                if
-                    PlayerID =/= none -> % there's a player at this location
-                        ok; % TODO: PLACEHOLDER
-                    true -> ok
                 end
             end,
             lists:seq(0,15)) end,
@@ -142,4 +142,24 @@ insert_tile(Position=[X,Y], Type, Contains) ->
         end end,
         mnesia:activity(transaction, F).
 
+%% Initialize a player in the appropriate mnesia player table
+init_player([X,Y], PlayerID) ->
+    Fun = fun() ->
+        Init_player_record = #mnesia_players{
+            player_ID = PlayerID,
+            position = [X,Y],
+            next_position = none
+        },
+        case PlayerID of
+            'player_1' ->
+                mnesia:write(gn1_players, Init_player_record, write);
+            'player_2' ->
+                mnesia:write(gn2_players, Init_player_record, write);
+            'player_3' ->
+                mnesia:write(gn3_players, Init_player_record, write);
+            'player_4' ->
+                mnesia:write(gn4_players, Init_player_record, write)
+        end end,
+    io:format("CN: initialized a player entry ~w at location ~w~n",[PlayerID, [X,Y]]),
+    mnesia:activity(transaction, Fun).
 

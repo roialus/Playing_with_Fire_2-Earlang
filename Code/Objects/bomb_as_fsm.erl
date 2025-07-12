@@ -12,12 +12,14 @@
 -behaviour(gen_statem).
 
 %% API
--export([start_link/4]). % todo: check whether start_link/start_monitor is desired
+-export([start_link/4,
+    freeze_bomb/1, kick_bomb/2, answer_move_req/2,damage_taken/1]). % todo: check whether start_link/start_monitor is desired
 
 %% gen_statem callbacks
 -export([init/1, format_status/2, terminate/3,
     code_change/4, callback_mode/0]).
 
+%% States function
 -export([remote_idle/3, armed/3, active_movement/3, delayed_explosion_state/3,
     remote_armed/3, remote_idle_movement/3, remote_armed_frozen_movement/3]).
 
@@ -38,6 +40,22 @@ start_link(Pos_x, Pos_y, Type, Optional) ->
     %% optional is a list containing [Player_ID, Radius]
     %% bomb is nameless - identified based on Pid (**consider changing if needed**)
     gen_statem:start_link({local}, ?MODULE, [[Pos_x, Pos_y], Type, self(), Optional], []).
+
+%% @doc send freeze message to bomb
+freeze_bomb(BombPid) ->
+    gen_statem:cast(BombPid, freeze).
+
+%% @doc return value to this is the reply, {reply, From, {request_movement, Direction}}
+kick_bomb(BombPid, Direction) ->
+    gen_statem:call(BombPid, {kick, Direction}).
+
+%% @doc GN answering to move request
+%% can be: 'approved', {'approved_switch_gn', NewGN}, 'denied'
+answer_move_req(BombPid, Answer) ->
+    gen_statem:cast(BombPid, {reply_move_req, Answer}).
+
+damage_taken(BombPid) ->
+    gen_statem:cast(BombPid, damage_taken).
 
 %%%===================================================================
 %%% gen_statem callbacks
@@ -64,7 +82,7 @@ init([Position, Type, Gn_Pid, Optional]) ->
                         type = Type,
                         gn_pid = Gn_Pid,
                         owner = Player_ID,
-                        radius = Radius }
+                        radius = Radius}
     end,
     case StateData#bomb_state.type of
         regular ->

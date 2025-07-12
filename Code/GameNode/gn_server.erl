@@ -60,7 +60,7 @@ init([GN_number, PlayerType]) ->
         powerups_table_name = generate_atom_table_names(GN_number, "_powerups"),
         players_table_name = generate_atom_table_names(GN_number, "_players")},
     initialize_tiles(Data#gn_state.tiles_table_name),
-    initialize_players(Data#gn_state.players_table_name, PlayerType), % todo
+    initialize_players(Data#gn_state.players_table_name, PlayerType, GN_number), % todo
     {ok, Data}.
 
 %% @private
@@ -135,4 +135,26 @@ initialize_tiles(TableName) ->
         end,
     mnesia:activity(transaction, Fun).
 
-initialize_players(TableName, PlayerType) -> ok. % TODO
+initialize_players(TableName, PlayerType, GN_number) ->
+    Player_name = list_to_atom("player_" ++ integer_to_list(GN_number)),
+    %% start io_handler gen_server
+    %% Dumb case to create a boolean for initialization. todo: everything in this init should later be streamlined
+    IsBotBool = case PlayerType of
+                    bot -> true;
+                    _ -> false
+                end,
+    {ok, IO_pid} = io_handler:start_link(GN_number, IsBotBool),
+    Fun = fun() ->
+        {atomic, [PlayerRecord = #mnesia_players{}]} = mnesia:read(TableName, Player_name),
+        {ok, FSM_pid} = player_fsm:start_link(GN_number, PlayerRecord#mnesia_players.position, self(), IsBotBool, IO_pid),
+        %% update FSM Pid in the IO process
+        ok = io_handler:set_player_pid(IO_pid, FSM_pid),
+        %% Update mnesia record
+        UpdatedRecord = PlayerRecord#mnesia_players{
+            original_node_id = node(),
+            gn_pid = self(),
+            io_handler_pid = IO_pid,
+            pid = FSM_pid},
+        mnesia:write(TableName, UpdatedRecord, write)
+        end,
+    mnesia:activity(transaction, Fun).

@@ -20,7 +20,7 @@
 -define(TICK, 50). % Input polling interval
 
 -record(io_state, {
-    player_pid,              % Player FSM PID
+    player_pid = none,              % Player FSM PID
     player_number,           % Player number (1-4)
     waiting_for_ack = false, % Waiting for player response
     input_buffer = [],       % Buffered inputs while waiting

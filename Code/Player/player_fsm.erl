@@ -9,7 +9,7 @@
 -module(player_fsm).
 -behaviour(gen_statem).
 
--export([start_link/4, input_command/2, gn_response/2, inflict_damage/1]).
+-export([start_link/5, input_command/2, gn_response/2, inflict_damage/1]).
 
 %% gen_statem callbacks
 -export([callback_mode/0, init/1, terminate/3, code_change/4]).
@@ -59,10 +59,10 @@
 %% @doc Spawns the player FSM
 -spec start_link(PlayerNumber::integer(), StartPos::[integer()], GN_Pid::pid(), IsBot::boolean()) ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}.
-start_link(PlayerNumber, StartPos, GN_Pid, IsBot) ->
+start_link(PlayerNumber, StartPos, GN_Pid, IsBot, IO_pid) ->
     ServerName = list_to_atom("player_" ++ integer_to_list(PlayerNumber)),
     gen_statem:start_link({local, ServerName}, ?MODULE, 
-        [PlayerNumber, StartPos, GN_Pid, IsBot, self()], []).
+        [PlayerNumber, StartPos, GN_Pid, IsBot, self(), IO_pid], []).
 
 %% @doc Send input command from I/O handler
 input_command(PlayerPid, Command) ->
@@ -85,7 +85,7 @@ inflict_damage(PlayerPid) ->
 callback_mode() ->
     state_functions.
 
-init([PlayerNumber, StartPos, GN_Pid, IsBot, ProcessId]) ->
+init([PlayerNumber, StartPos, GN_Pid, IsBot, ProcessId, IO_pid]) ->
     Data = #player_data{
         player_number = PlayerNumber,
         position = StartPos,
@@ -93,7 +93,8 @@ init([PlayerNumber, StartPos, GN_Pid, IsBot, ProcessId]) ->
         original_node_id = node(),
         process_id = ProcessId,
         gn_pid = GN_Pid,
-        bot = IsBot
+        bot = IsBot,
+        io_handler_pid = IO_pid
     },
     
     % Start cooldown timer
