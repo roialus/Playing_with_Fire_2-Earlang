@@ -18,12 +18,9 @@
     code_change/3]).
 
 %-define(SERVER, ?MODULE).
+-include("common_parameters.hrl").
 
--record(tile_state, {
-    position, % position - [X,Y]
-    type, % can be - unbreakable, breakable, two_hit (-> one_hit)
-    contains % can be - none (no power-up), bomb (that'll trigger on its own), or any speed-up
-}).
+-include("object_records.hrl").
 
 
 %%%===================================================================
