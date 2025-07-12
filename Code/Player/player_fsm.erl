@@ -31,7 +31,7 @@
     % Process info
     request_cooldown = 0,  % milliseconds until next GN request allowed
     original_node_id,      % node where player was created
-    process_id,           % this process PID
+    pid,           % this process PID
     gn_pid,              % GN PID
     io_handler_pid,      % I/O Handler PID
     
@@ -57,7 +57,7 @@
 %%%===================================================================
 
 %% @doc Spawns the player FSM
--spec start_link(PlayerNumber::integer(), StartPos::[integer()], GN_Pid::pid(), IsBot::boolean()) ->
+-spec start_link(PlayerNumber::integer(), StartPos::[integer()], GN_Pid::pid(), IsBot::boolean(), IO_pid::pid()) ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}.
 start_link(PlayerNumber, StartPos, GN_Pid, IsBot, IO_pid) ->
     ServerName = list_to_atom("player_" ++ integer_to_list(PlayerNumber)),
@@ -91,7 +91,7 @@ init([PlayerNumber, StartPos, GN_Pid, IsBot, ProcessId, IO_pid]) ->
         position = StartPos,
         next_position = StartPos,
         original_node_id = node(),
-        process_id = ProcessId,
+        pid = ProcessId,
         gn_pid = GN_Pid,
         bot = IsBot,
         io_handler_pid = IO_pid
