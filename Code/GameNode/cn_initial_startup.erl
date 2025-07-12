@@ -10,13 +10,15 @@
 -author("dolev").
 
 %% API
--export([test/1, connecting_nodes/1]).
+-compile(export_all).
+%-export([test/1, connecting_nodes/1]).
 
 %% **NOTE:** when terminating, need to use application:stop(mnesia)
 
 -include("mnesia_records.hrl").
 
 %% --------------------------------------------------------------
+%% ==================== Testing Functions =======================
 %% todo: for super-massive debugging use sys:trace(Pid, true).
 %% @doc connecting nodes according to an IP list
 connecting_nodes(IPList) ->
@@ -28,24 +30,63 @@ connecting_nodes(IPList) ->
         fun(IP) -> io:format("Pinging ~w : ~w~n",[IP, net_adm:ping(IP)]) end, IPsAsAtoms),
     IPsAsAtoms.
 
-%% --------------------------------------------------------------
+
 
 test(NodeList) ->
     %% NodeList = [node(), gn_node1, gn_node2, gn_node3, gn_node4] -- THIS IS HOW THIS LIST SHOULD LOOK LIKE
     Map = test_unified_map:get_map(),
-    application:set_env(mnesia, dir, "~/Documents/mnesia_files"),
+    application:set_env(mnesia, dir, "/Documents/mnesia_files"),
     mnesia:create_schema([NodeList]),
     rpc:multicall(NodeList, application, start, [mnesia]), % multiple nodes
     % application:start(mnesia), % single node
 
     %% initialize mnesia tables per each game-node
+    %% * This is the "degraded" version for simple testing - One CN node and one GN node.
     TableNamesList = lists:map(fun(X) ->
-            create_tables(lists:nth(X, NodeList), node(), X)
-        end, lists:seq(1,length(NodeList))),
+        create_tables(lists:nth(2, NodeList), node(), X) end, lists:seq(1,4)),
+
+    %% * Full-fledged version - one CN, 4 GNs
+    %%TableNamesList = lists:map(fun(X) ->
+    %%        create_tables(lists:nth(X, NodeList), node(), X)
+    %%    end, lists:seq(1,length(NodeList))),
+
     mnesia:wait_for_tables(lists:flatten(TableNamesList), 5000), % timeout is 5000ms for now
     insert_map_to_database(Map),
-    io:format("Initial map condioions loaded successfully to mnesia tables~n"),
+    io:format("Initial map state loaded successfully to mnesia tables~n"),
+    test_mnesia_tables(),
     ok.
+
+%% Test all mnesia tables and verify data integrity
+test_mnesia_tables() ->
+    io:format("~n=== Testing Mnesia Tables ===~n"),
+    
+    % Test each GN table
+    lists:foreach(fun(GN) ->
+        test_gn_tables(GN)
+    end, [1, 2, 3, 4]),
+    
+    
+    io:format("=== Mnesia Table Tests Completed ===~n~n").
+
+%% Test tables for specific Game Node
+test_gn_tables(GN) ->
+    TilesTable = generate_atom_table_names(GN, "_tiles"),
+    BombsTable = generate_atom_table_names(GN, "_bombs"),
+    PowerupsTable = generate_atom_table_names(GN, "_powerups"),
+    PlayersTable = generate_atom_table_names(GN, "_players"),
+    
+    % Count tiles in this GN
+    TileCount = mnesia:table_info(TilesTable, size),
+    BombCount = mnesia:table_info(BombsTable, size),
+    PowerupCount = mnesia:table_info(PowerupsTable, size),
+    PlayerCount = mnesia:table_info(PlayersTable, size),
+    
+    io:format("GN~p - Tiles: ~p, Bombs: ~p, Powerups: ~p, Players: ~p~n", 
+        [GN, TileCount, BombCount, PowerupCount, PlayerCount]).
+
+
+
+%% --------------------------------------------------------------
 
 
 %% helper function to create mnesia table names
