@@ -28,7 +28,7 @@ connecting_nodes(IPList) ->
         lists:seq(1,length(IPList))),
     lists:map(
         fun(IP) -> io:format("Pinging ~w : ~w~n",[IP, net_adm:ping(IP)]) end, IPsAsAtoms),
-    IPsAsAtoms.
+    [node()] ++ IPsAsAtoms.
 
 
 
