@@ -23,10 +23,10 @@
 %% @doc connecting nodes according to an IP list
 connecting_nodes(IPList) ->
     %% each erl shell will be called 'GN#@IP where IP is from the list.
-    IPsAsAtoms = lists:foreach(
+    IPsAsAtoms = lists:map(
         fun(X) -> list_to_atom("GN" ++ integer_to_list(X) ++"@" ++ lists:nth(X, IPList)) end,
         lists:seq(1,length(IPList))),
-    lists:map(
+    lists:foreach(
         fun(IP) -> io:format("Pinging ~w : ~w~n",[IP, net_adm:ping(IP)]) end, IPsAsAtoms),
     [node()] ++ IPsAsAtoms.
 
@@ -35,7 +35,8 @@ connecting_nodes(IPList) ->
 test(NodeList) ->
     %% NodeList = [node(), gn_node1, gn_node2, gn_node3, gn_node4] -- THIS IS HOW THIS LIST SHOULD LOOK LIKE
     Map = map_generator:test_generation(), % creating a new map from scratch
-    application:set_env(mnesia, dir, "/Documents/mnesia_files"),
+    %rpc:multicall(NodeList, application, set_env, [mnesia, dir, "/home/dolev/Documents/mnesia_files"]),
+    application:set_env(mnesia, dir, "/home/dolev/Documents/mnesia_files"),
     mnesia:create_schema(NodeList),
     rpc:multicall(NodeList, application, start, [mnesia]), % multiple nodes
     % application:start(mnesia), % single node
@@ -43,7 +44,9 @@ test(NodeList) ->
     %% initialize mnesia tables per each game-node
     %% * This is the "degraded" version for simple testing - One CN node and one GN node.
     TableNamesList = lists:map(fun(X) ->
-        create_tables(lists:nth(2, NodeList), node(), X) end, lists:seq(1,4)),
+        Result = create_tables(lists:nth(2, NodeList), node(), X),
+        io:format("*Create table result: ~p~n", [Result]) 
+        end, lists:seq(1,4)),
 
     %% * Full-fledged version - one CN, 4 GNs
     %%TableNamesList = lists:map(fun(X) ->
@@ -56,7 +59,7 @@ test(NodeList) ->
     mnesia:system_info(tables),
 
     % ? Check if gn3_tiles is loaded and available
-    mnesia:table_info(gn3_tiles, where_to_read),
+    io:format("Tables: ~p~n", [mnesia:system_info(tables)]),
 
     insert_map_to_database(Map),
     io:format("Initial map state loaded successfully to mnesia tables~n"),
@@ -106,37 +109,36 @@ create_tables(GN_node, CN_node, Node_number) ->
     Mnesia_powerups_name = generate_atom_table_names(Node_number, "_powerups"),
     Mnesia_players_name = generate_atom_table_names(Node_number, "_players"),
     %% initialize all mnesia tables, per game node
-    mnesia:create_table(Mnesia_tiles_name, [
+    Debug1 = mnesia:create_table(Mnesia_tiles_name, [
         {attributes, record_info(fields, mnesia_tiles)},
         {disc_copies, [CN_node]},
         {ram_copies, [GN_node]},
         {record_name, mnesia_tiles},
         {type, set}
         ]),
-    mnesia:create_table(Mnesia_bombs_name, [
+    Debug2 = mnesia:create_table(Mnesia_bombs_name, [
         {attributes, record_info(fields, mnesia_bombs)},
         {disc_copies, [CN_node]},
         {ram_copies, [GN_node]},
         {record_name, mnesia_bombs},
         {type, set}
     ]),
-    mnesia:create_table(Mnesia_powerups_name, [
+    Debug3 = mnesia:create_table(Mnesia_powerups_name, [
         {attributes, record_info(fields, mnesia_powerups)},
         {disc_copies, [CN_node]},
         {ram_copies, [GN_node]},
         {record_name, mnesia_powerups},
         {type, set}
     ]),
-    mnesia:create_table(Mnesia_players_name, [
+    Debug4 = mnesia:create_table(Mnesia_players_name, [
         {attributes, record_info(fields, mnesia_players)},
         {disc_copies, [CN_node]},
         {ram_copies, [GN_node]},
         {record_name, mnesia_players},
         {type, set}
     ]),
-    io:format("CN: Initialized the following tables: ~w , ~w , ~w , ~w successfully~n",
-        [Mnesia_tiles_name,Mnesia_bombs_name, Mnesia_powerups_name, Mnesia_players_name]),
-    [Mnesia_tiles_name, Mnesia_bombs_name, Mnesia_powerups_name, Mnesia_players_name].
+    io:format("CN: full printout of create_tables for node number #~w:~ntiles: ~w~nbombs: ~w~npowerups: ~w~nplayers: ~w~n", 
+        [Node_number,Debug1 ,Debug2, Debug3, Debug4]).
 
 
 %% ============ Helper functions - inserting to table ============
