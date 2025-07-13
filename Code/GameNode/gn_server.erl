@@ -20,12 +20,6 @@
 
 -define(SERVER, ?MODULE).
 
--record(gn_state, {
-    tiles_table_name,
-    bombs_table_name,
-    powerups_table_name,
-    players_table_name
-}).
 
 -include_lib("mnesia_records.hrl").
 -include_lib("src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl"). %% ? This should work for compiling under rebar3.
@@ -42,13 +36,13 @@
 start_link(GN_number, PlayerType) ->
     %% PlayerType = bot/human
     GN_name = list_to_atom("GN_" ++ integer_to_list(GN_number)),
-    gen_server:start_link({global, GN_name}, ?MODULE, [GN_number, PlayerType], []). % register GN names GLOBALLY
+     %% register GN_X names GLOBALLY, process priority set to high
+    gen_server:start_link({global, GN_name}, ?MODULE, [GN_number, PlayerType], [{priority, high}]).
 
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 
-%% @private
 %% @doc Initializes the server
 -spec(init(Args :: term()) ->
 {ok, State :: #gn_state{}} | {ok, State :: #gn_state{}, timeout() | hibernate} |
@@ -63,7 +57,6 @@ init([GN_number, PlayerType]) ->
     initialize_players(Data#gn_state.players_table_name, PlayerType, GN_number),
     {ok, Data}.
 
-%% @private
 %% @doc Handling call messages
 -spec(handle_call(Request :: term(), From :: {pid(), Tag :: term()},
     State :: #gn_state{}) ->
@@ -76,7 +69,6 @@ init([GN_number, PlayerType]) ->
 handle_call(_Request, _From, State = #gn_state{}) ->
 {reply, ok, State}.
 
-%% @private
 %% @doc Handling cast messages
 -spec(handle_cast(Request :: term(), State :: #gn_state{}) ->
 {noreply, NewState :: #gn_state{}} |
@@ -85,7 +77,6 @@ handle_call(_Request, _From, State = #gn_state{}) ->
 handle_cast(_Request, State = #gn_state{}) ->
 {noreply, State}.
 
-%% @private
 %% @doc Handling all non call/cast messages
 -spec(handle_info(Info :: timeout() | term(), State :: #gn_state{}) ->
 {noreply, NewState :: #gn_state{}} |
@@ -94,7 +85,6 @@ handle_cast(_Request, State = #gn_state{}) ->
 handle_info(_Info, State = #gn_state{}) ->
 {noreply, State}.
 
-%% @private
 %% @doc This function is called by a gen_server when it is about to
 %% terminate. It should be the opposite of Module:init/1 and do any
 %% necessary cleaning up. When it returns, the gen_server terminates
@@ -104,7 +94,6 @@ handle_info(_Info, State = #gn_state{}) ->
 terminate(_Reason, _State = #gn_state{}) ->
 ok.
 
-%% @private
 %% @doc Convert process state when code is changed
 -spec(code_change(OldVsn :: term() | {down, term()}, State :: #gn_state{},
 Extra :: term()) ->
@@ -115,7 +104,7 @@ code_change(_OldVsn, State = #gn_state{}, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-%% helper function to create mnesia table names
+%% @doc helper function to create mnesia table names
 generate_atom_table_names(Number, Type) ->
     list_to_atom("gn" ++ integer_to_list(Number) ++ Type).
 

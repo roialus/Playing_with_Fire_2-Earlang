@@ -10,6 +10,14 @@
 
 %% * All record definitions regarding the mnesia database are defined here
 
+-record(gn_state, {
+    tiles_table_name,
+    bombs_table_name,
+    powerups_table_name,
+    players_table_name
+}).
+
+
 -record(mnesia_tiles, {
     position, % position - [X,Y]
     type, % can be - unbreakable, breakable, two_hit (-> one_hit)
