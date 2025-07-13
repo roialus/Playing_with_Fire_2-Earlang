@@ -31,12 +31,12 @@ connecting_nodes(IPList) ->
     [node()] ++ IPsAsAtoms.
 
 
-
+-spec test(list()) -> ok.
 test(NodeList) ->
     %% NodeList = [node(), gn_node1, gn_node2, gn_node3, gn_node4] -- THIS IS HOW THIS LIST SHOULD LOOK LIKE
     Map = map_generator:test_generation(), % creating a new map from scratch
     application:set_env(mnesia, dir, "/Documents/mnesia_files"),
-    mnesia:create_schema([NodeList]),
+    mnesia:create_schema(NodeList),
     rpc:multicall(NodeList, application, start, [mnesia]), % multiple nodes
     % application:start(mnesia), % single node
 
@@ -51,6 +51,13 @@ test(NodeList) ->
     %%    end, lists:seq(1,length(NodeList))),
 
     mnesia:wait_for_tables(lists:flatten(TableNamesList), 5000), % timeout is 5000ms for now
+
+    % ?List all tables
+    mnesia:system_info(tables),
+
+    % ? Check if gn3_tiles is loaded and available
+    mnesia:table_info(gn3_tiles, where_to_read),
+
     insert_map_to_database(Map),
     io:format("Initial map state loaded successfully to mnesia tables~n"),
     test_mnesia_tables(),
