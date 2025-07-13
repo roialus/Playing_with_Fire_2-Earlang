@@ -113,7 +113,7 @@ initial_mnesia_load(TableNamesList, Map) ->
     io:format("*Initial map state loaded successfully to mnesia tables~n").
 
 
-%% @doc recieve-block that catches all decisions from GNs and returns a sorted list of tuples
+%% @doc recieve-block that catches all decisions from GNs and returns a sorted list of tuples {1, true}, {2, false} ...
 await_players_decisions(0, Acc, _GN_list) -> lists:sort(fun({A,_}, {B,_}) -> A =< B end, Acc);
 await_players_decisions(N, Acc, GN_list) ->
     receive
