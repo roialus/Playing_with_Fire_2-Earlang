@@ -28,7 +28,7 @@
 }).
 
 -include_lib("mnesia_records.hrl").
--include_lib("/home/dolev/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl"). %% todo: need to find a way around full-path
+-include_lib("src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl"). %% ? This should work for compiling under rebar3.
 
 
 
