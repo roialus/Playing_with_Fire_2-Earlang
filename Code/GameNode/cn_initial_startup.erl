@@ -34,7 +34,7 @@ connecting_nodes(IPList) ->
 
 test(NodeList) ->
     %% NodeList = [node(), gn_node1, gn_node2, gn_node3, gn_node4] -- THIS IS HOW THIS LIST SHOULD LOOK LIKE
-    Map = test_unified_map:get_map(),
+    Map = map_generator:test_generation(), % creating a new map from scratch
     application:set_env(mnesia, dir, "/Documents/mnesia_files"),
     mnesia:create_schema([NodeList]),
     rpc:multicall(NodeList, application, start, [mnesia]), % multiple nodes
