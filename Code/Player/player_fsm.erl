@@ -26,14 +26,18 @@
     % Player identification
     player_number,      % 1/2/3/4
     position,          % [X, Y]
-    next_position,     % [X', Y'] - intended next position
+    direction, % desired direction movement - none/up/down/left/right
+    movement, % false |{true,TimerRef}
+         % todo: changed from next_position to movement&direction, verify consistency in the code
     
     % Process info
-    request_cooldown = 0,  % milliseconds until next GN request allowed
-    original_node_id,      % node where player was created
-    pid,           % this process PID
-    gn_pid,              % GN PID
-    io_handler_pid,      % I/O Handler PID
+    % todo: changed the names of some of these (local_gn, pid, target_gn) - verify consistency
+    request_cooldown = 0,   % milliseconds until next GN request allowed
+    local_gn = default, % which GN (**registered name**) does the player FSM & IO is physically running on
+    local_gn_pid = default, % which gn (**PID**) does the player FSM sends all his problems
+    target_gn = default, % Which GN(**registered name**) does the player need to communicate with (in whose quarter is he)
+    pid = default,   % this process PID
+    io_handler_pid,         % I/O Handler PID
     
     % Connection status
     disconnected = 0,     % counter to 60 (seconds), then kill process
@@ -62,13 +66,13 @@
 start_link(PlayerNumber, StartPos, GN_Pid, IsBot, IO_pid) ->
     ServerName = list_to_atom("player_" ++ integer_to_list(PlayerNumber)),
     gen_statem:start_link({local, ServerName}, ?MODULE, 
-        [PlayerNumber, StartPos, GN_Pid, IsBot, self(), IO_pid], []).
+        [PlayerNumber, StartPos, GN_Pid, IsBot, IO_pid], []).
 
 %% @doc Send input command from I/O handler
 input_command(PlayerPid, Command) ->
     gen_statem:cast(PlayerPid, {input_command, Command}).
 
-%% @doc Send response from Game Node
+%% @doc Send response from GN
 gn_response(PlayerPid, Response) ->
     gen_statem:cast(PlayerPid, {gn_response, Response}).
 
@@ -85,14 +89,16 @@ inflict_damage(PlayerPid) ->
 callback_mode() ->
     state_functions.
 
-init([PlayerNumber, StartPos, GN_Pid, IsBot, ProcessId, IO_pid]) ->
+init([PlayerNumber, StartPos, GN_Pid, IsBot, IO_pid]) ->
+    {_, GN_registered_name} = process_info(GN_Pid, registered_name),
     Data = #player_data{
         player_number = PlayerNumber,
         position = StartPos,
-        next_position = StartPos,
-        original_node_id = node(),
-        pid = ProcessId,
-        gn_pid = GN_Pid,
+        direction = none,
+        local_gn = GN_registered_name,
+        target_gn = GN_registered_name, % starting at own GN's quarter
+        pid = self(),
+        local_gn_pid = GN_Pid,
         bot = IsBot,
         io_handler_pid = IO_pid
     },
@@ -237,13 +243,13 @@ handle_input_command(Command, Data) ->
         true ->
             case process_command(Command, Data) of
                 {ok, Request, NewData} ->
-                    % Send request to GN
-                    gen_server:cast(Data#player_data.gn_pid, 
-                        {player_request, Request, self()}),
+                    % Send request to local GN
+                    gen_server:cast(Data#player_data.local_gn_pid, 
+                        {player_message, Request}), % ? removed self() from the tuple, relevant data already in Request
                     
                     % Update cooldown
                     CooldownData = NewData#player_data{
-                        request_cooldown = ?REQUEST_COOLDOWN,
+                        request_cooldown = ?REQUEST_COOLDOWN, % ? 
                         last_request_time = erlang:system_time(millisecond)
                     },
                     {next_state, waiting_gn_response, CooldownData};
@@ -261,10 +267,12 @@ handle_input_command(Command, Data) ->
 process_command(Command, Data) ->
     case Command of
         {move, Direction} ->
-            NextPos = calculate_next_position(Data#player_data.position, Direction),    % calculate next position
-            Request = {move_request, Data#player_data.position, NextPos, 
-                      Data#player_data.special_abilities},  % create move request
-            NewData = Data#player_data{next_position = NextPos},    % update next position
+            %% * Request = {move_request, "WhoAmI", "TargetGN", "Direction"}
+            Request = {move_request, Data#player_data.player_number, Data#player_data.target_gn, Direction},
+            %//NextPos = calculate_next_position(Data#player_data.position, Direction),    % calculate next position
+            %//Request = {move_request, Data#player_data.position, NextPos, 
+            %//          Data#player_data.special_abilities},  % create move request
+            NewData = Data#player_data{direction = Direction}, % register request in 'direction'
             {ok, Request, NewData};
             
         drop_bomb ->

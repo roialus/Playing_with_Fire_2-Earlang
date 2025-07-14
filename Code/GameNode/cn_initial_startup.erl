@@ -331,9 +331,11 @@ insert_tile(Position=[X,Y], Type, Contains) ->
 init_player([X,Y], PlayerID) ->
     Fun = fun() ->
         Init_player_record = #mnesia_players{
-            player_ID = PlayerID,
+            player_number = list_to_integer([lists:nth(8, atom_to_list(PlayerID))]),
             position = [X,Y],
-            next_position = none
+            direction = none,
+            movement = false,
+            hosted = true % every player always starts at his own GN's quarter
         },
         case PlayerID of
             'player_1' ->

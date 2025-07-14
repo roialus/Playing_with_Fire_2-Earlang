@@ -13,7 +13,7 @@
 
 % API
 -export([start_link/1]).
--import(gn_server, [generate_atom_table_names/2]).
+-import(gn_server, [generate_atom_table_names/2]). % to not have to specify the import everytime
 
 %% gen_server callbacks
 -export([init/1,
@@ -49,7 +49,7 @@ start_link(GN_playmode_list) ->
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
-%% @doc Initializes all 4 gn servers, assuring proper creation ({Ok, Pid}) (timeout after 20 sec as backup),
+%% @doc Initializes all 4 gn servers, assuring proper creation ({Ok, Pid}) and monitoring them (timeout after 20 sec as backup),
 %% The data stored is a list of records, each record contains the names (atoms) of the mnesia tables the CN shares with him
 %% Accessing the name can be in 2 ways:
 %% "Nameless": lists:nth(2, CN_data)#gn_data.players OR
@@ -78,20 +78,33 @@ init([GN_playmode_list]) -> % [ {GN_number, Answer, NodeID} , {..} ]
     {ok, CN_data}.
 
 
-    
+
 
 
 %% @doc 
 handle_call(_Request, _From, State) ->
     {reply, ignored, State}.
 
-%% @doc 
+%% @doc Handling forwarding requests
+handle_cast({forward_request, Request}, State) ->
+    forward_requests(Request, State) % todo: implementation not final
+    {noreply, State};
+
+%% @doc General cast messages - as of now ignored.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-%% @doc 
+
+%% @doc Handles failure messages from the monitored processes
+handle_info({'DOWN', Ref, process, Pid, Reason} , Data=[GN1=#gn_data{}, GN2=#gn_data{}, GN3=#gn_data{}, GN4=#gn_data{}]) -> 
+    %% todo: placeholder
+    io:format("*CN: monitored process ~w with ref ~w failed, reason:~w~n",[Pid,Ref,Reason]),
+    {noreply, Data};
+
+%% @doc General messages received as info - as of now ignored.
 handle_info(_Info, State) ->
     {noreply, State}.
+
 
 %% @doc 
 terminate(_Reason, _State) ->
@@ -107,3 +120,23 @@ code_change(_OldVsn, State, _Extra) ->
 generate_table_names(GN) ->
     [generate_atom_table_names(GN, "_tiles"), generate_atom_table_names(GN, "_bombs"),
         generate_atom_table_names(GN, "_powerups"), generate_atom_table_names(GN, "_players")].
+
+forward_requests(Request, State) ->
+    case Request of
+        {player_message, {move_request, PlayerNum, TargetGN, Direction}} ->
+            gen_server:cast(TargetGN, {forwarded, {move_request, PlayerNum, Direction}});
+
+        _ -> placeholder % todo: other requests
+    
+    end.
+
+
+
+%% ? I used this in earlier iteration, but changed the code where it was needed. Remove this comment if its used after-all
+find_pid_by_node(TargetNode, GNList) ->
+    case lists:filter(
+        fun(#gn_data{pid = Pid}) -> node(Pid) =:= TargetGN end, State) of
+        
+        [#gn_data{pid = Pid}] -> Pid;
+        _ -> pid_not_found
+    end.
