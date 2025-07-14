@@ -1,3 +1,7 @@
+%% ? this file isn't used, just to supress errors
+-compile(nowarn_unused_function).
+-compile(nowarn_unused_vars).
+
 %%%-------------------------------------------------------------------
 %%% @author dolev
 %%% @copyright (C) 2025, <COMPANY>
@@ -58,7 +62,7 @@
 %% @doc Spawns the server and registers the local name (unique)
 -spec(start_link(Pos_x::integer, Pos_y::integer,
     Type:: 'regular'|'remote'|'repeating',
-    Time_created:: time(),
+    Time_created:: integer(),
     Optional:: list()) ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 

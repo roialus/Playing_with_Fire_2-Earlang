@@ -770,7 +770,7 @@ test_generation() ->
     visualize_map(Grid),
     
     % Export for testing
-    export_map(Grid, "test_unified_map.erl"),
+    %export_map(Grid, "test_unified_map.erl"),
     
     io:format("✅ Unified grid test complete!~n"),
     Grid.

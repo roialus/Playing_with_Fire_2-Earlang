@@ -8,7 +8,15 @@
 %%%-------------------------------------------------------------------
 -author("dolev").
 
-%% @doc All record definitions regarding the mnesia database are defined here
+%% * All record definitions regarding the mnesia database are defined here
+
+-record(gn_state, {
+    tiles_table_name,
+    bombs_table_name,
+    powerups_table_name,
+    players_table_name
+}).
+
 
 -record(mnesia_tiles, {
     position, % position - [X,Y]
@@ -39,18 +47,18 @@
     pid = none
 }).
 
--record(mnesia_players, { %% @doc this is a mish-mash between existing player_fsm.erl and what's needed
+-record(mnesia_players, { %% !doc this is a mish-mash between existing player_fsm.erl and what's needed
     % identification
     player_ID, % player_1/player_2 ..
     position, % [X,Y]
-    next_position, % [X', Y'] - intended next position % todo: this has to change
+    next_position, % [X', Y'] - intended next position % ! this has to change - adopted a movement = false |{true,up} for bombs
 
     % Process info
     request_cooldown = 0,  % milliseconds until next GN request allowed
-    original_node_id,      % node where player was created
-    %process_id,           % this process PID - CALLED 'pid' below
-    gn_pid,              % GN PID
-    io_handler_pid,      % I/O Handler PID
+    original_node_id = default,      % node where player was created
+    %process_id,           % * this process PID - CALLED 'pid' below
+    gn_pid = default,              % GN PID
+    io_handler_pid = default,      % I/O Handler PID
 
     % Connection status
     disconnected = 0,     % counter to 60 (seconds), then kill process

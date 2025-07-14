@@ -10,42 +10,226 @@
 -author("dolev").
 
 %% API
--export([test/1, connecting_nodes/1]).
+-compile(export_all).
+%-export([test/1, connecting_nodes/1]).
 
 %% **NOTE:** when terminating, need to use application:stop(mnesia)
 
 -include("mnesia_records.hrl").
 
 %% --------------------------------------------------------------
+%% ==================== Intended Workflow =======================
+%% *** These functions were written after the mnesia database tests were successful,
+%% *** and contain the flow of how this module should work like in the pdf design
+%% @doc This is the function to be called when starting from CN. Should be started using the IP prefix of the local network (aka '192.168.1.')
+start(IP_prefix) ->
+    %% Discovers all GNs in the local network
+    GN_list = discover_GNs(IP_prefix), % ? Perplexity suggested using 'nodefinder'. Current function is sweeping all options
+    register(cn_start, self()), % ! registers this process locally as 'cn_start' so other nodes can communicate directly to it
+    %% Awaiting for connections from all GNs
+    ok = await_initial_connections(0, []),
+    %% * After each connection, the CN replies with an ACK containing the number of nodes connected so far (incl. current one).
+    %% * Is able to receive a connection message and also a disconnect message (someone went back to the menu)
+    %% * Returns with an 'ok' (for debugging mostly) after 4 GNs in total are connected.
+
+    %% All GNs connected, send message to all nodes to choose play-mode (bot/human),
+    %% ! Assumption: the starting process in each GN is registered locally as gn_start
+    %% todo: on the *GN side*, send {Pid, playmode, true} if playing as bot or {Pid, playmode, false} if human-player
+    lists:foreach(fun(Node) -> {gn_start, Node} ! {choose_playmode, are_you_bot} end, GN_list),
+
+    %% * From this point until the game actually starts, the GNs shouldn't be able to disconnect/crash.
+    %% Initialize map and database across all GNs
+
+    Map = map_generator:test_generation(), % creating a new, randomized map
+    %% Starting mnesia database
+    NodeList = node() ++ GN_list,
+    application:set_env(mnesia, dir, "/home/dolev/Documents/mnesia_files"), % ! Change directory based on PC running on, critical for CN
+    mnesia:create_schema(NodeList), % mnesia start-up requirement
+    rpc:multicall(NodeList, application, start, [mnesia]), % Starts mnesia on all nodes
+    %% Insert map into mnesia tables
+    %% * This is the "degraded" version for simple testing - One CN node and one GN node.
+    TableNamesList = lists:map(fun(X) ->
+        Result = create_tables(lists:nth(2, NodeList), node(), X),
+        io:format("*Create table result: ~p~n", [Result]) 
+        end, lists:seq(1,4)),
+
+    %% * Full-fledged version - one CN, 4 GNs
+    %%TableNamesList = lists:map(fun(X) ->
+    %%        create_tables(lists:nth(X, NodeList), node(), X)
+    %%    end, lists:seq(1,length(NodeList))),
+    
+    %% * The loading of the mnesia tables is done in parallel 
+    Mnesia_loading_pid = spawn_link(?MODULE, initial_mnesia_load, [TableNamesList, Map]),
+    %% Await GNs decision - play as bot or human
+    GNs_decisions = await_players_decisions(4,[], GN_list),
+
+    %% TODO: This is stupid way to check if the mnesia load finished, need to think about something better, maybe message when its done?
+    case erlang:is_process_alive(Mnesia_loading_pid) of
+        false -> ok; % finished initializing by the time all GNs sent their answer
+        true -> 
+            timer:sleep(5000),
+            false = erlang:is_process_alive(Mnesia_loading_pid) % ? crash the process if it's still alive
+    end,
+    {ok, _Pid_cn_graphics} = cn_graphics_server:start_link(), % TODO: module doesn't exist.
+    %% TODO: on init, the graphics server spawns(%likns) all gn graphics servers
+    {ok, _Pid_cn_server} = cn_server:start_link(GNs_decisions), % TODO: module doesn't exist.
+    %% TODO: On init, the cn server spawns(&links) all gn gen_servers.
+    ok.
+
+
+%% =================== Auxiliary Functions ======================
+
+%% @doc Collects GNs connection requests, exits when 4 nodes are conected. Monitors whoever connects for process exit,
+%% Replies with {connect_ack, Count} where Count is the number of nodes connected so far (incl. current).
+%% Able to receive: {Pid, connect} , {Pid, disconnect}, {'DOWN', Ref, process, Pid, _Reason}
+%% When done returns 'ok'.
+await_initial_connections(4, _List) -> ok;
+await_initial_connections(Acc,List) ->
+    %% * List = [{Pid, Ref}, {Pid, Ref}, ... ]
+    receive
+        {From, connect} -> 
+            Ref = erlang:monitor(process, From), % monitor incoming process for unexpect failure
+            NewCount = Acc + 1,
+            From ! {conect_ack, NewCount},
+            await_initial_connections(NewCount, [{From, Ref} | List]);
+        {From, disconnect} -> % remove that process from the list, reduce counter
+            {value, {_,Ref_disconnected}, NewList} = lists:keytake(From, 1, List),
+            erlang:demonitor(Ref_disconnected), % demonitor process
+            await_initial_connections(Acc-1, NewList);
+        {'DOWN', Ref, process, Pid, _Reason} = Msg ->  % connected process closed unexpectedly
+            case lists:keytake(Ref, 2, List) of
+                false -> % caught a 'DOWN' from someone else, re-queue it in mailbox
+                    self() ! Msg; 
+                {value, {Pid, Ref}, NewList} -> % process exists within our list
+                    await_initial_connections(Acc-1, NewList)
+            end
+    end.
+
+
+%% @doc awaits mnesia table's finalized setup, then inserts the generated map-state to the tables
+initial_mnesia_load(TableNamesList, Map) ->
+    mnesia:wait_for_tables(lists:flatten(TableNamesList), 5000), % ? timeout is 5000ms for now
+    insert_map_to_database(Map),
+    io:format("*Initial map state loaded successfully to mnesia tables~n").
+
+
+%% @doc recieve-block that catches all decisions from GNs and returns a sorted list of tuples {1, true}, {2, false} ...
+await_players_decisions(0, Acc, _GN_list) -> lists:sort(fun({A,_}, {B,_}) -> A =< B end, Acc);
+await_players_decisions(N, Acc, GN_list) ->
+    receive
+        {Pid, playmode, Answer} when is_pid(Pid), is_boolean(Answer) ->
+            case lists:member(node(Pid),GN_list) of
+                true ->
+                    GN_number = list_to_integer([lists:nth(3, atom_to_list(node(Pid)))]),
+                    await_players_decisions(N-1, [{GN_number, Answer} | Acc ], GN_list);
+                false -> % caught a different message, re-queue in mailbox
+                    self() ! {Pid, Answer},
+                    await_players_decisions(N, Acc, GN_list)
+            end
+    end.
+
+
+
+
+%% @doc Attempting to communicate with all possible IPs in the local network, returning a the GNs in the network (nodes called GNx@192.168.1.Y )
+discover_GNs(IP_prefix) ->
+    Looking_for = ["GN1@", "GN2@", "GN3@", "GN4@"],
+    lists:flatten(
+        [
+            case net_adm:names(IP_prefix ++ integer_to_list(X)) of % asks each IP for all nodes he operates
+                {ok, Names} -> % IP responded with a lists of his erlang nodes
+                    %% filter only nodes of our GNs
+                    [NodeName || {Name, _Port} <- Names, NodeNameStr = Name ++ "@" ++ "Prefix" ++ integer_to_list(X), % reconstruct the node name
+                lists:any(fun(Y) -> lists:prefix(Y, NodeNameStr) end, Looking_for),
+                NodeName = list_to_atom(NodeNameStr),
+                NodeName =/= node(), % not my own node
+                net_adm:ping(NodeName) =:= pong % ping node
+            ];
+            _ -> [] % IP didn't respond, ignore it (probably doesn't hold our GNs)
+            end || X <- lists:seq(3,253)]
+        ).
+
+
+
+
+%% ==================== Testing Functions =======================
 %% todo: for super-massive debugging use sys:trace(Pid, true).
-%% @doc connecting nodes according to an IP list
+%% @doc connecting nodes according to an IP list, returning nodelist used for test/1
 connecting_nodes(IPList) ->
     %% each erl shell will be called 'GN#@IP where IP is from the list.
-    IPsAsAtoms = lists:foreach(
+    IPsAsAtoms = lists:map(
         fun(X) -> list_to_atom("GN" ++ integer_to_list(X) ++"@" ++ lists:nth(X, IPList)) end,
         lists:seq(1,length(IPList))),
-    lists:map(
+    lists:foreach(
         fun(IP) -> io:format("Pinging ~w : ~w~n",[IP, net_adm:ping(IP)]) end, IPsAsAtoms),
-    IPsAsAtoms.
+    [node()] ++ IPsAsAtoms.
 
-%% --------------------------------------------------------------
 
+-spec test(list()) -> ok.
 test(NodeList) ->
     %% NodeList = [node(), gn_node1, gn_node2, gn_node3, gn_node4] -- THIS IS HOW THIS LIST SHOULD LOOK LIKE
-    Map = test_unified_map:get_map(),
-    application:set_env(mnesia, dir, "~/Documents/mnesia_files"),
-    mnesia:create_schema([NodeList]),
+    Map = map_generator:test_generation(), % creating a new map from scratch
+    %rpc:multicall(NodeList, application, set_env, [mnesia, dir, "/home/dolev/Documents/mnesia_files"]),
+    application:set_env(mnesia, dir, "/home/dolev/Documents/mnesia_files"),
+    mnesia:create_schema(NodeList),
     rpc:multicall(NodeList, application, start, [mnesia]), % multiple nodes
     % application:start(mnesia), % single node
 
     %% initialize mnesia tables per each game-node
+    %% * This is the "degraded" version for simple testing - One CN node and one GN node.
     TableNamesList = lists:map(fun(X) ->
-            create_tables(lists:nth(X, NodeList), node(), X)
-        end, lists:seq(1,length(NodeList))),
+        Result = create_tables(lists:nth(2, NodeList), node(), X),
+        io:format("*Create table result: ~p~n", [Result]) 
+        end, lists:seq(1,4)),
+
+    %% * Full-fledged version - one CN, 4 GNs
+    %%TableNamesList = lists:map(fun(X) ->
+    %%        create_tables(lists:nth(X, NodeList), node(), X)
+    %%    end, lists:seq(1,length(NodeList))),
+
     mnesia:wait_for_tables(lists:flatten(TableNamesList), 5000), % timeout is 5000ms for now
+
+    % ?List all tables
+    mnesia:system_info(tables),
+
+    % ? Check if gn3_tiles is loaded and available
+    io:format("Tables: ~p~n", [mnesia:system_info(tables)]),
+
     insert_map_to_database(Map),
-    io:format("Initial map condioions loaded successfully to mnesia tables~n"),
+    io:format("Initial map state loaded successfully to mnesia tables~n"),
+    test_mnesia_tables(),
     ok.
+
+%% Test all mnesia tables and verify data integrity
+test_mnesia_tables() ->
+    io:format("~n=== Testing Mnesia Tables ===~n"),
+    
+    % Test each GN table
+    lists:foreach(fun(GN) ->
+        test_gn_tables(GN)
+    end, [1, 2, 3, 4]),
+    
+    
+    io:format("=== Mnesia Table Tests Completed ===~n~n").
+
+%% Test tables for specific Game Node
+test_gn_tables(GN) ->
+    TilesTable = generate_atom_table_names(GN, "_tiles"),
+    BombsTable = generate_atom_table_names(GN, "_bombs"),
+    PowerupsTable = generate_atom_table_names(GN, "_powerups"),
+    PlayersTable = generate_atom_table_names(GN, "_players"),
+    
+    % Count tiles in this GN
+    TileCount = mnesia:table_info(TilesTable, size),
+    BombCount = mnesia:table_info(BombsTable, size),
+    PowerupCount = mnesia:table_info(PowerupsTable, size),
+    PlayerCount = mnesia:table_info(PlayersTable, size),
+    
+    io:format("GN~p - Tiles: ~p, Bombs: ~p, Powerups: ~p, Players: ~p~n", 
+        [GN, TileCount, BombCount, PowerupCount, PlayerCount]).
+
+
+%% ==============================================================
 
 
 %% helper function to create mnesia table names
@@ -58,37 +242,36 @@ create_tables(GN_node, CN_node, Node_number) ->
     Mnesia_powerups_name = generate_atom_table_names(Node_number, "_powerups"),
     Mnesia_players_name = generate_atom_table_names(Node_number, "_players"),
     %% initialize all mnesia tables, per game node
-    mnesia:create_table(Mnesia_tiles_name, [
+    Debug1 = mnesia:create_table(Mnesia_tiles_name, [
         {attributes, record_info(fields, mnesia_tiles)},
         {disc_copies, [CN_node]},
         {ram_copies, [GN_node]},
         {record_name, mnesia_tiles},
         {type, set}
         ]),
-    mnesia:create_table(Mnesia_bombs_name, [
+    Debug2 = mnesia:create_table(Mnesia_bombs_name, [
         {attributes, record_info(fields, mnesia_bombs)},
         {disc_copies, [CN_node]},
         {ram_copies, [GN_node]},
         {record_name, mnesia_bombs},
         {type, set}
     ]),
-    mnesia:create_table(Mnesia_powerups_name, [
+    Debug3 = mnesia:create_table(Mnesia_powerups_name, [
         {attributes, record_info(fields, mnesia_powerups)},
         {disc_copies, [CN_node]},
         {ram_copies, [GN_node]},
         {record_name, mnesia_powerups},
         {type, set}
     ]),
-    mnesia:create_table(Mnesia_players_name, [
+    Debug4 = mnesia:create_table(Mnesia_players_name, [
         {attributes, record_info(fields, mnesia_players)},
         {disc_copies, [CN_node]},
         {ram_copies, [GN_node]},
         {record_name, mnesia_players},
         {type, set}
     ]),
-    io:format("CN: Initialized the following tables: ~w , ~w , ~w , ~w successfully~n",
-        [Mnesia_tiles_name,Mnesia_bombs_name, Mnesia_powerups_name, Mnesia_players_name]),
-    [Mnesia_tiles_name, Mnesia_bombs_name, Mnesia_powerups_name, Mnesia_players_name].
+    io:format("CN: full printout of create_tables for node number #~w:~ntiles: ~w~nbombs: ~w~npowerups: ~w~nplayers: ~w~n", 
+        [Node_number,Debug1 ,Debug2, Debug3, Debug4]).
 
 
 %% ============ Helper functions - inserting to table ============
