@@ -46,17 +46,19 @@ start(IP_prefix) ->
     application:set_env(mnesia, dir, "/home/dolev/Documents/mnesia_files"), % ! Change directory based on PC running on, critical for CN
     mnesia:create_schema(NodeList), % mnesia start-up requirement
     rpc:multicall(NodeList, application, start, [mnesia]), % Starts mnesia on all nodes
+    
     %% Insert map into mnesia tables
+
     %% * This is the "degraded" version for simple testing - One CN node and one GN node.
-    TableNamesList = lists:map(fun(X) ->
-        Result = create_tables(lists:nth(2, NodeList), node(), X),
-        io:format("*Create table result: ~p~n", [Result]) 
-        end, lists:seq(1,4)),
+    %%TableNamesList = lists:map(fun(X) ->
+    %%    Result = create_tables(lists:nth(2, NodeList), node(), X),
+    %%    io:format("*Create table result: ~p~n", [Result]) 
+    %%    end, lists:seq(1,4)),
 
     %% * Full-fledged version - one CN, 4 GNs
-    %%TableNamesList = lists:map(fun(X) ->
-    %%        create_tables(lists:nth(X, NodeList), node(), X)
-    %%    end, lists:seq(1,length(NodeList))),
+    TableNamesList = lists:map(fun(X) ->
+            create_tables(lists:nth(X, NodeList), node(), X)
+        end, lists:seq(1,length(NodeList))),
     
     %% * The loading of the mnesia tables is done in parallel 
     Mnesia_loading_pid = spawn_link(?MODULE, initial_mnesia_load, [TableNamesList, Map]),
@@ -113,15 +115,15 @@ initial_mnesia_load(TableNamesList, Map) ->
     io:format("*Initial map state loaded successfully to mnesia tables~n").
 
 
-%% @doc recieve-block that catches all decisions from GNs and returns a sorted list of tuples {1, true}, {2, false} ...
-await_players_decisions(0, Acc, _GN_list) -> lists:sort(fun({A,_}, {B,_}) -> A =< B end, Acc);
+%% @doc recieve-block that catches all decisions from GNs and returns a sorted list of tuples {1, true, Node_1_ID}, {2, false, Node_1_ID} ...
+await_players_decisions(0, Acc, _GN_list) -> lists:sort(fun({A,_,_}, {B,_,_}) -> A =< B end, Acc);
 await_players_decisions(N, Acc, GN_list) ->
     receive
         {Pid, playmode, Answer} when is_pid(Pid), is_boolean(Answer) ->
             case lists:member(node(Pid),GN_list) of
                 true ->
                     GN_number = list_to_integer([lists:nth(3, atom_to_list(node(Pid)))]),
-                    await_players_decisions(N-1, [{GN_number, Answer} | Acc ], GN_list);
+                    await_players_decisions(N-1, [{GN_number, Answer, node(Pid)} | Acc ], GN_list);
                 false -> % caught a different message, re-queue in mailbox
                     self() ! {Pid, Answer},
                     await_players_decisions(N, Acc, GN_list)

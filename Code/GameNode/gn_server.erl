@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/2]).
+-export([start_link/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -31,13 +31,13 @@
 %%%===================================================================
 
 %% @doc Spawns the server and registers the local name (unique)
--spec(start_link(GN_number::integer(), PlayerType::'bot'|'human') ->
+-spec(start_link({GN_number::integer(), IsBot::boolean()}) ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
-start_link(GN_number, PlayerType) ->
+start_link({GN_number, IsBot}) ->
     %% PlayerType = bot/human
     GN_name = list_to_atom("GN_" ++ integer_to_list(GN_number)),
      %% register GN_X names GLOBALLY, process priority set to high
-    gen_server:start_link({global, GN_name}, ?MODULE, [GN_number, PlayerType], [{priority, high}]).
+    gen_server:start_link({global, GN_name}, ?MODULE, [GN_number, IsBot], [{priority, high}]).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -128,16 +128,11 @@ initialize_tiles(TableName) ->
 initialize_players(TableName, PlayerType, GN_number) ->
     Player_name = list_to_atom("player_" ++ integer_to_list(GN_number)),
     %% start io_handler gen_server
-    %% todo: Dumb case to create a boolean for initialization. everything in this init should later be streamlined
-    IsBotBool = case PlayerType of
-                    bot -> true;
-                    _ -> false
-                end,
-    {ok, IO_pid} = io_handler:start_link(GN_number, IsBotBool),
+    {ok, IO_pid} = io_handler:start_link(GN_number, PlayerType),
     Fun = fun() ->
         {atomic, [PlayerRecord = #mnesia_players{}]} = mnesia:read(TableName, Player_name),
         {ok, FSM_pid} = player_fsm:start_link(GN_number, PlayerRecord#mnesia_players.position, self(),
-         IsBotBool, IO_pid),
+         PlayerType, IO_pid),
         %% update FSM Pid in the IO process
         ok = io_handler:set_player_pid(IO_pid, FSM_pid),
         %% Update mnesia record
