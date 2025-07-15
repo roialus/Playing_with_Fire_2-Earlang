@@ -15,14 +15,11 @@
 -export([start_link/1]).
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
-    code_change/3]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 
 -include_lib("mnesia_records.hrl").
 -include_lib("src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl"). %% ? This should work for compiling under rebar3.
-
-
 
 %%%===================================================================
 %%% API
@@ -65,7 +62,7 @@ init([GN_number, PlayerType]) ->
     {stop, Reason :: term(), Reply :: term(), NewState :: #gn_state{}} |
     {stop, Reason :: term(), NewState :: #gn_state{}}).
 handle_call(_Request, _From, State = #gn_state{}) ->
-{reply, ok, State}.
+    {reply, ok, State}.
 
 
 -spec(handle_cast(Request :: term(), State :: #gn_state{}) ->
@@ -136,7 +133,7 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
             case is_record(Player_record) of
                 true -> 
                     %% Everything as normal (found the record), pass the message
-                    player_fsm:gn_response(Player_record#mnesia_players.pid, {move_result, Answer}),
+                    player_fsm:gn_response(Player_record#mnesia_players.pid, {move_result, Answer});
                 false -> % crash the process
                     erlang:error(record_not_found, [node(), PlayerRecord])
             end,
@@ -144,7 +141,7 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
 
         %% * A GN got a respond for a movement request of a player to 
         %% * another quarter - this is the forwarded response handler
-        %% ! This deals with the situation where the player is hosted on another GN - can be modified later
+        %% * This deals with situations where the Player FSM is on the same node as the relevant GN and when its on another
         {movement_clearance, player, PlayerNum, Answer} ->
             case Answer of
                 can_move ->
@@ -153,31 +150,38 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
                     %% todo: update mnesia table - direction and movement
                     %% todo: open timer for half-way (when we update the player's position)
                     %% respond to the player FSM via CN->hosting GN
-                    gen_server:cast(cn_server,
-                        {forward_request, HostingGN, % ! HostingGN is placeholder - get it from the record returned by the function that's left todo 
-                            {gn_answer, {move_result, player, PlayerNum, accepted}}
-                        });
+                    case Player_record#mnesia_players.hosted of % ! Player_record is not defined here, used here for presentation purposes
+                        true -> 
+                            %% Player FSM is on this machine, send message directly
+                            player_fsm:gn_response(Player_record#mnesia_players.pid, {move_result, Answer}); 
+                        false ->
+                            %% Player FSM is on another machine, forward through CN->local GN
+                            gen_server:cast(cn_server,
+                                {forward_request, HostingGN, % ! HostingGN is placeholder - get it from the record returned by the function that's left todo 
+                                    {gn_answer, {move_result, player, PlayerNum, accepted}}
+                                })
+                    end;
+                    
                 cant_move -> % cannot move to the other node
                     %% Update direction to none, send acknowledge to the player FSM
                     Player_record = update_player_direction(PlayerNum, State#gn_state.players_table_name, none),
-                    case is_record(Player_record) of
-                        true ->
+                    case {is_record(Player_record),Player_record#mnesia_players.hosted} of
+                        {true, true} ->
+                            %% Player FSM is on this machine, send message directly
+                            player_fsm:gn_response(Player_record#mnesia_players.pid, {move_result, Answer}); 
+                        {true, false} ->
                             %% send message to player FSM through the CN -> hosting GN
                             gen_Server:cast(cn_server,
                                 {forward_request, Player_record#mnesia_players.local_gn,
                                     {gn_answer, {move_result, player, PlayerNum, denied}}
-                                }),
-                        false ->
+                                });
+                        {false,_} ->
                             %% couldn't find the record, crash the process
                             erlang:error(record_not_found, [node(), Player_record])
                     end
             end,
             {noreply, State};
 
-
-            
-
-    end;
 
 handle_cast({move_request_out_of_bounds, EntityType, ActualRequest}, State) ->
     %% handling a move request from another GN
@@ -228,6 +232,7 @@ code_change(_OldVsn, State = #gn_state{}, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
 %% @doc returns the registered name of a Pid
 get_registered_name(Pid) ->
     {_, Registered_name} = process_info(Pid, registered_name),
@@ -282,7 +287,7 @@ read_player_from_table(PlayerNum, Table) ->
     Fun = fun() ->
         case mnesia:read(Table, PlayerNum) of
             [PlayerRecord = #mnesia_players{}] -> PlayerRecord;
-        [] -> not_found; % should cause an error
+            [] -> not_found % should cause an error
         end,
     end,
     mnesia:activity(transaction, Fun).
@@ -301,3 +306,20 @@ update_player_direction(PlayerNum, Table, NewValue) ->
         end
     end,
     mnesia:activity(transaction, Fun).
+
+
+handle_player_move_request(State= #gn_state{}, {PlayerNum, Direction}) -> % TODO
+    %% todo: calculate destination coordinate
+    %% todo: check if that coordinate is under this GN's control or
+    %% todo: if yes: attempt player movement (as detailed in the todo for attempt_player_movement under handle_cast),
+    %% todo:         can't move: respond to player FSM 
+    %%                     player_fsm:gn_response(Player_record#mnesia_players.pid, {move_result, Answer});
+    %% todo:        can move: update mnesia table, open timer for halfway (when we update the player's position)
+    %% todo: if not: send message to CN - like below
+    gen_server:cast(cn_server, 
+        {query_request, get_registered_name(self()), 
+            {move_request_out_of_bounds, player, PlayerNum, Destination_coord, Direction}
+        }),
+    placeholder.
+
+

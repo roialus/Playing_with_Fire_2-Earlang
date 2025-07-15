@@ -65,7 +65,7 @@
     io_handler_pid = default,      % I/O Handler PID
     
     % player FSM pid
-    pid = default
+    pid = default,
 
     % Connection status
     disconnected = 0,     % counter to 60 (seconds), then kill process
@@ -80,7 +80,5 @@
 
     bombs_placed = 0,    % currently placed bombs (bombs - bombs_placed = available)
     immunity_timer = none, % reference to immunity timer
-    last_request_time = 0,  % timestamp of last GN request
-
-
+    last_request_time = 0  % timestamp of last GN request
 }).

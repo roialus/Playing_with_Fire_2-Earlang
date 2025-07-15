@@ -392,16 +392,19 @@ can_send_request(Data) ->
 can_drop_bomb(Data) ->
     Data#player_data.bombs_placed < Data#player_data.bombs. % can drop bomb if placed bombs < max bombs
 
-calculate_next_position([X, Y], Direction) ->
-    case Direction of
-        up    -> [X, Y-1];
-        down  -> [X, Y+1];
-        left  -> [X-1, Y];
-        right -> [X+1, Y]
-    end.
+% ! noted to supress compilation errors
+%calculate_next_position([X, Y], Direction) ->
+%    case Direction of
+%        up    -> [X, Y-1];
+%        down  -> [X, Y+1];
+%        left  -> [X-1, Y];
+%        right -> [X+1, Y]
+%    end.
 
 update_position(NewPos, Data) ->
-    Data#player_data{position = NewPos, next_position = NewPos}.
+    %! change is to supress compilation errors for now
+    ok.
+    %Data#player_data{position = NewPos, next_position = NewPos}.
 
 apply_powerup(none, Data) ->
     Data;
