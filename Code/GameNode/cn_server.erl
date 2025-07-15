@@ -87,16 +87,17 @@ handle_call(_Request, _From, State) ->
 
 %% @doc Handling forwarding requests
 handle_cast({forward_request, Request}, State) ->
+    %% ! need to switch to a convention as to how to write these messages - currently its shit
     forward_requests(Request, State) % todo: implementation not final
     {noreply, State};
 
 %% @doc Handling checks to switch GNs
 handle_cast({req_exceeds_gn, Request}, State) ->
     %% * this below is the Request's contents
-    {player_move_request, PlayerNum, Destination_coord, AskingGN} = Request,
+    {player_move_request, PlayerNum, Destination_coord, Direction, AskingGN} = Request,
     %% todo: find which GN oversees the coordinate, extract from Player's mnesia table the relevant buffs
     %% todo: pass the appropriate GN the message {forwarded, {checking_movement_possibility, {playerID, Destination_coord, [relevant buffs], AskingGN}
-    gen_server:cast(TargetGN, {forwarded, {checking_movement_possibility, {PlayerNum, Destination_coord, [Buffs_from_table], AskingGN}}}),
+    gen_server:cast(TargetGN, {forwarded, {checking_movement_possibility, {PlayerNum, Destination_coord, Direction, [Buffs_from_table], AskingGN}}}),
     {noreply, State};
 
 %% @doc General cast messages - as of now ignored.
@@ -143,6 +144,7 @@ forward_requests(Request, State) ->
             gen_server:cast(HostingGN, {gn_answer, Request});
         _ -> placeholder % todo: other requests
     
+        
     end.
 
 

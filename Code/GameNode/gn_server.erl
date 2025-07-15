@@ -115,7 +115,7 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
                 dest_not_here -> % destination coordinate is overseen by another GN
                     {_, GN_registered_name} = process_info(self(), registered_name),
                     gen_server:cast(cn_server,
-                        {req_exceeds_gn, {player_move_request, PlayerNum, Destination_coord, GN_registered_name}})
+                        {req_exceeds_gn, {player_move_request, PlayerNum, Destination_coord, Direction, GN_registered_name}})
             end,
             {noreply, State};
 
@@ -130,6 +130,22 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
                 false -> % crash the process
                     erlang:error(record_not_found, [node(), PlayerRecord])
             end
+
+        {checking_movement_possibility, {PlayerNum, Destination_coord, Direction, BuffsList, AskingGN}} ->
+            %% todo: check destination coordinate for obstacles (if the move is possible),
+            %% todo: this should also "kickstart" any action caused by this attempted movement
+            %% todo: returns "can_move" or "cant_move"
+            %% * this function should be similar to attempt_player_movement, but slightly different
+            {_, ReplyingGN} = process_info(self(), registered_name),
+            case attempt_player_entrance(Destination_coord, Direction, BuffsList, State) of
+                %% ! both these messages are unaddressed in the cn_server right now - need to embrace a convention for thie message's layout
+                can_move -> 
+                    gen_server:cast(cn_server, {forward_request, AskingGn, {movement_clearance, can_move, PlayerNum, ReplyingGN}});
+                cant_move ->
+                    gen_server:cast(cn_server, {forward_request, AskingGn, {movement_clearance, cant_move, PlayerNum, ReplyingGN}});
+            end
+            {noreply, State};
+
             
 
     end;
