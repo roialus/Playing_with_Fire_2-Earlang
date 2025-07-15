@@ -101,21 +101,37 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
             Destination_coord = placeholder,
 
             %% * as detailed in the massive todo above ^^
-            case attempt_player_movement(PlayerNum, Direction, State) of
+            case attempt_player_movement(PlayerNum, Direction, State = #gn_state{}) of
                 can_move -> 
                     %% todo: update mnesia table
                     %% todo: open timer for half-way (when we update the player's position)
                     %% send an ACK to the player FSM via CN->hosting GN
                     gen_server:cast(cn_server,
                         {forward_request, {gn_answer, HostingGN, {move_request, accepted, PlayerNum}}});
+                        %% todo: update mnesia table, open a timer for 'half-way' of the movement
                 cant_move -> % can't move, obstacle blocking
                     gen_server:cast(cn_server,
                         {forward_request, {gn_answer, HostingGN, {move_request, denied, PlayerNum}}});
                 dest_not_here -> % destination coordinate is overseen by another GN
+                    {_, GN_registered_name} = process_info(self(), registered_name),
                     gen_server:cast(cn_server,
-                        {req_exceeds_gn, {player_move_request, Destination_coord, node()}})
+                        {req_exceeds_gn, {player_move_request, PlayerNum, Destination_coord, GN_registered_name}})
             end,
-            {noreply, State}
+            {noreply, State};
+
+        {move_request, Answer, PlayerNum} -> % GN answered the movement request
+            %% todo: query the mnesia player table by the PlayerNum to get his Pid
+            Player_record = read_player_from_table(PlayerNum, State#gn_state.players_table_name),
+            case is_record(Player_record) of
+                true -> 
+                    %% Pass message to player FSM
+                    player_fsm:gn_response(Player_record#mnesia_players.pid, {move_result, Answer}),
+                    {noreply, State}
+                false -> % crash the process
+                    erlang:error(record_not_found, [node(), PlayerRecord])
+            end
+            
+
     end;
 
 
@@ -172,11 +188,11 @@ initialize_tiles(TableName) ->
 
 -spec initialize_players(TableName:: atom(), PlayerType:: atom(), GN_number::1|2|3|4) -> term().
 initialize_players(TableName, PlayerType, GN_number) ->
-    Player_name = list_to_atom("player_" ++ integer_to_list(GN_number)),
+    %% //Player_name = list_to_atom("player_" ++ integer_to_list(GN_number)),
     %% start io_handler gen_server
     {ok, IO_pid} = io_handler:start_link(GN_number, PlayerType),
     Fun = fun() ->
-        {atomic, [PlayerRecord = #mnesia_players{}]} = mnesia:read(TableName, Player_name),
+        [PlayerRecord = #mnesia_players{}] = mnesia:read(TableName, GN_number),
         {ok, FSM_pid} = player_fsm:start_link(GN_number, PlayerRecord#mnesia_players.position, self(),
          PlayerType, IO_pid),
         %% update FSM Pid in the IO process
@@ -191,4 +207,15 @@ initialize_players(TableName, PlayerType, GN_number) ->
             bot = PlayerType},
         mnesia:write(TableName, UpdatedRecord, write)
         end,
+    mnesia:activity(transaction, Fun).
+
+
+-spec read_player_from_table(PlayerNum::integer(), record()) -> record().
+read_player_from_table(PlayerNum, Table) ->
+    Fun = fun() ->
+        case mnesia:read(Table, PlayerNum) of
+            [PlayerRecord = #mnesia_players{}] -> PlayerRecord;
+        [] -> not_found; % should cause an error
+        end,
+    end,
     mnesia:activity(transaction, Fun).

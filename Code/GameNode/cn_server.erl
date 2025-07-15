@@ -77,23 +77,35 @@ init([GN_playmode_list]) -> % [ {GN_number, Answer, NodeID} , {..} ]
         end, lists:seq(1,4)),
     {ok, CN_data}.
 
-
-
-
-
+%%%================== handle call ==================
 %% @doc 
 handle_call(_Request, _From, State) ->
     {reply, ignored, State}.
+
+
+%%%================== handle cast ==================
 
 %% @doc Handling forwarding requests
 handle_cast({forward_request, Request}, State) ->
     forward_requests(Request, State) % todo: implementation not final
     {noreply, State};
 
+%% @doc Handling checks to switch GNs
+handle_cast({req_exceeds_gn, Request}, State) ->
+    %% * this below is the Request's contents
+    {player_move_request, PlayerNum, Destination_coord, AskingGN} = Request,
+    %% todo: find which GN oversees the coordinate, extract from Player's mnesia table the relevant buffs
+    %% todo: pass the appropriate GN the message {forwarded, {checking_movement_possibility, {playerID, Destination_coord, [relevant buffs], AskingGN}
+    gen_server:cast(TargetGN, {forwarded, {checking_movement_possibility, {PlayerNum, Destination_coord, [Buffs_from_table], AskingGN}}}),
+    {noreply, State};
+
 %% @doc General cast messages - as of now ignored.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+
+
+%%%================== handle info ==================
 
 %% @doc Handles failure messages from the monitored processes
 handle_info({'DOWN', Ref, process, Pid, Reason} , Data=[GN1=#gn_data{}, GN2=#gn_data{}, GN3=#gn_data{}, GN4=#gn_data{}]) -> 
@@ -125,7 +137,10 @@ forward_requests(Request, State) ->
     case Request of
         {player_message, {move_request, PlayerNum, TargetGN, Direction}} ->
             gen_server:cast(TargetGN, {forwarded, {move_request, PlayerNum, Direction}});
-
+        
+        {gn_answer, HostingGN, Request} -> % answer back to the player FSM for move request
+        %% forwards message: {gn_answer, {move_request, accepted/denied, PlayerNum}
+            gen_server:cast(HostingGN, {gn_answer, Request});
         _ -> placeholder % todo: other requests
     
     end.

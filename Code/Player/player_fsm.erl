@@ -302,6 +302,15 @@ process_command(Command, Data) ->
 
 handle_gn_response(Response, Data) ->
     case Response of
+        {move_result, accepted} -> % move successful
+            %% todo: don't allow any movement inputs besides 'going back' for the time it takes to be at
+            %% todo: half-way point of the movement
+            placeholder;
+        {move_result, denied} -> % move denied
+            %% todo: don't allow any movement request for a short time
+            placeholder;
+
+        %% !! this entire section below is outdated
         {move_result, success, NewPos, PickedUpPowerup} ->
             % Move successful
             NewData = update_position(NewPos, Data),    % update player position
