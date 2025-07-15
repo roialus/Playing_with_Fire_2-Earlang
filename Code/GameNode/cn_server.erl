@@ -86,18 +86,23 @@ handle_call(_Request, _From, State) ->
 %%%================== handle cast ==================
 
 %% @doc Handling forwarding requests
-handle_cast({forward_request, Request}, State) ->
-    %% ! need to switch to a convention as to how to write these messages - currently its shit
-    forward_requests(Request, State) % todo: implementation not final
+handle_cast({forward_request, Destination, Request}, State) ->
+    %% * forward requests look like {forward_request, Destination_GN_name, Request={..} }
+    %% * Sends the new message as {forwarded, Request={..}}
+    gen_server:cast(Destination, {forwarded, Request}),
     {noreply, State};
 
 %% @doc Handling checks to switch GNs
-handle_cast({req_exceeds_gn, Request}, State) ->
+handle_cast({query_request, AskingGN, Request}, State) ->
     %% * this below is the Request's contents
-    {player_move_request, PlayerNum, Destination_coord, Direction, AskingGN} = Request,
-    %% todo: find which GN oversees the coordinate, extract from Player's mnesia table the relevant buffs
-    %% todo: pass the appropriate GN the message {forwarded, {checking_movement_possibility, {playerID, Destination_coord, [relevant buffs], AskingGN}
-    gen_server:cast(TargetGN, {forwarded, {checking_movement_possibility, {PlayerNum, Destination_coord, Direction, [Buffs_from_table], AskingGN}}}),
+    case Request of
+        {move_request_out_of_bounds, player, PlayerNum, Destination_coord, Direction} ->
+        %% todo: find which GN oversees the coordinate, extract from Player's mnesia table the relevant buffs
+        %% todo: pass the appropriate GN the message {forwarded, {checking_movement_possibility, {playerID, Destination_coord, [relevant buffs], AskingGN}
+        gen_server:cast(TargetGN,
+            {move_request_out_of_bounds, player,
+                {PlayerNum, Destination_coord, Direction, [Buffs_from_table], AskingGN}
+            }),
     {noreply, State};
 
 %% @doc General cast messages - as of now ignored.
@@ -134,8 +139,10 @@ generate_table_names(GN) ->
     [generate_atom_table_names(GN, "_tiles"), generate_atom_table_names(GN, "_bombs"),
         generate_atom_table_names(GN, "_powerups"), generate_atom_table_names(GN, "_players")].
 
-forward_requests(Request, State) ->
-    case Request of
+%% ! deprecated
+forward_requests(Request, Destination, State) ->
+    gen_server:cast(Destination, Request)
+
         {player_message, {move_request, PlayerNum, TargetGN, Direction}} ->
             gen_server:cast(TargetGN, {forwarded, {move_request, PlayerNum, Direction}});
         

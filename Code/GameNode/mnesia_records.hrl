@@ -59,9 +59,9 @@
     
     % Process info
     % //request_cooldown = 0,   % milliseconds until next GN request allowed
-    local_gn = default, % which GN (**node?**) does the player FSM & IO is physically running on 
+    local_gn = default, % which GN (registered name) does the player FSM & IO is physically running on 
     local_gn_pid = default, % which gn (**PID**) does the player FSM sends all his problems
-    target_gn = default, % Which GN(**node?**) does the player need to communicate with (in whose quarter is he)
+    target_gn = default, % Which GN (register name) does the player need to communicate with (in whose quarter is he)
     io_handler_pid = default,      % I/O Handler PID
     
     % player FSM pid

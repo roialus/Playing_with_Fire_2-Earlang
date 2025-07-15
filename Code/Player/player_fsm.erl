@@ -268,6 +268,7 @@ process_command(Command, Data) ->
     case Command of
         {move, Direction} ->
             %% * Request = {move_request, "WhoAmI", "TargetGN", "Direction"}
+            %% ! CHANGE TO: 
             Request = {move_request, Data#player_data.player_number, Data#player_data.target_gn, Direction},
             %//NextPos = calculate_next_position(Data#player_data.position, Direction),    % calculate next position
             %//Request = {move_request, Data#player_data.position, NextPos, 
