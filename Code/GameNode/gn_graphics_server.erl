@@ -27,7 +27,7 @@ start_link(CNNode) ->
 %%%===================================================================
 
 %% Initialize the GN graphics server
-init([GNNode]) ->
+init([CNNode]) ->
     io:format("🎮 GN Graphics Server starting on ~w~n", [node()]),
     
     State = #state{cn_node = CNNode},
