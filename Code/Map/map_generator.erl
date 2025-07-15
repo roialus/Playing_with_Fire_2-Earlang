@@ -219,7 +219,7 @@ set_borders(Grid) ->
     end, Grid2).
 
 clear_player_areas(Grid) ->
-    Corners = [{1, 1}, {1, 14}, {14, 1}, {14, 14}],
+    Corners = [{1, 1}, {14, 1}, {1, 14}, {14, 14}],
     
     lists:foldl(fun({CX, CY}, AccGrid) ->
         % Clear 2x2 area around each corner
@@ -655,6 +655,28 @@ visualize_map(Grid) ->
     io:format("  1-4 = Players~n").
 
 %% ===================================================================
+%% Port communication for python graphical interface
+%% ===================================================================
+
+%% Start the Python port for graphical interface
+start_grid_port() ->
+    Port = open_port({spawn, "python3 map_live_port.py"}, 
+                     [binary, exit_status, {packet, 4}]),
+    register(grid_port, Port),
+    Port.
+
+%% Send the grid to the Python port for visualization
+send_grid(Grid) ->
+    Bin = term_to_binary(convert_array_grid_to_list(Grid)),
+    grid_port ! {self(), {command, Bin}}.
+
+%% Convert the array grid to a list of lists for Python visualization
+convert_array_grid_to_list(Grid) ->
+    [ [ array:get(Y, array:get(X, Grid)) || Y <- lists:seq(0, ?MAP_SIZE - 1) ]
+        || X <- lists:seq(0, ?MAP_SIZE - 1) ].
+
+
+%% ===================================================================
 %% Export Map to Erlang Module (Enhanced for unified grid)
 %% ===================================================================
 
@@ -768,6 +790,11 @@ test_generation() ->
     
     % Visualize
     visualize_map(Grid),
+
+    % Send to Python port for graphical interface
+    io:format("Starting Python port for visualization...~n"),   % for debugging
+    start_grid_port(),
+    send_grid(Grid),
     
     % Export for testing
     %export_map(Grid, "test_unified_map.erl"),
