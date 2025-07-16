@@ -14,6 +14,8 @@
 %% API
 -export([start_link/1]).
 
+-export[get_registered_name/1].
+
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
@@ -74,7 +76,7 @@ handle_cast({player_message, Request}, State = #gn_state{}) ->
     ThisGN = get_registered_name(self),
     case Request of
         {move_request, PlayerNum, ThisGN , Direction} -> % move request from a player in our quarter
-            handle_player_move_request(State, {PlayerNum, Direction}), % TODO
+            req_player_move:handle_player_move_request(State, {PlayerNum, Direction}), % TODO - separate file
             {noreply, State};
         {move_request, PlayerNum, TargetGN, Direction} -> % move request from a player outside my quarter
             gen_server:cast(cn_server, {forward_request, TargetGN, {move_request, player, PlayerNum, Direction}}),
@@ -85,7 +87,7 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
     %% * handles forwarded messages
     case Request of
         {move_request, player, PlayerNum, Direction} ->
-            %% *  handles a move request of a player inside my quarter, FSM is on another node
+            %% *  handles a move request of a player inside my quarter whose FSM is on another node
             %% ?: handle this using several separated functions for maximal reusability
             %% todo: Check if the destination coordinates is in the current GN's control -
             %% todo: if it isn't: replies with 'dest_not_here'
@@ -93,14 +95,15 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
             %% todo             'can_move', 'cant_move' while also "kickstart" actions caused by the possible movement like
             %% todo:            kicking/freezing bombs.
 
-            %% TODO: extracts the player's record from mnesia's player table
-            Player#mnesia_players{} = placeholder,
+            %% extracts the player's record from mnesia's player table
+            Player#mnesia_players{} = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
 
-            %% TODO: calculate destination coordinates
-            Destination_coord = placeholder,
+            %% Calculate destination coordinates
+            Destination_coord = req_player_move:calc_new_coordinates(Player, Direction),
+
 
             %% * as detailed in the massive todo above ^^
-            case attempt_player_movement(PlayerNum, Direction, State = #gn_state{}) of
+            case req_player_move:attempt_player_movement(PlayerNum, Direction, State = #gn_state{}) of
                 can_move -> 
                     %% move is possible. Update data, open halfway timer, respond to player FSM
 
@@ -129,7 +132,7 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
         {move_result, player, PlayerNum, Answer} ->
             %% Pass the message to the Player FSM
             %% Look for the player in your own records (to find his Pid)
-            Player_record = read_player_from_table(PlayerNum, State#gn_state.players_table_name),
+            Player_record = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
             case is_record(Player_record) of
                 true -> 
                     %% Everything as normal (found the record), pass the message
@@ -164,7 +167,7 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
                     
                 cant_move -> % cannot move to the other node
                     %% Update direction to none, send acknowledge to the player FSM
-                    Player_record = update_player_direction(PlayerNum, State#gn_state.players_table_name, none),
+                    Player_record = req_player_move:update_player_direction(PlayerNum, State#gn_state.players_table_name, 'none'),
                     case {is_record(Player_record),Player_record#mnesia_players.hosted} of
                         {true, true} ->
                             %% Player FSM is on this machine, send message directly
@@ -203,7 +206,7 @@ handle_cast({move_request_out_of_bounds, EntityType, ActualRequest}, State) ->
     {noreply, State};
 
 handle_cast(_Request, State = #gn_state{}) ->
-{noreply, State}.
+    {noreply, State}.
 
 %% @doc Handling all non call/cast messages
 -spec(handle_info(Info :: timeout() | term(), State :: #gn_state{}) ->
@@ -280,46 +283,4 @@ initialize_players(TableName, PlayerType, GN_number) ->
         mnesia:write(TableName, UpdatedRecord, write)
         end,
     mnesia:activity(transaction, Fun).
-
-
--spec read_player_from_table(PlayerNum::integer(), record()) -> record().
-read_player_from_table(PlayerNum, Table) ->
-    Fun = fun() ->
-        case mnesia:read(Table, PlayerNum) of
-            [PlayerRecord = #mnesia_players{}] -> PlayerRecord;
-            [] -> not_found % should cause an error
-        end,
-    end,
-    mnesia:activity(transaction, Fun).
-
-
-update_player_direction(PlayerNum, Table, NewValue) ->
-    Fun = fun() ->
-        case mnesia:read(Table, PlayerNum, sticky_write) of
-            [Player_record = #mnesia_players{}] ->
-                Updated_record = Player_record#mnesia_players{direction = NewValue},
-                %% Insert updated record into table
-                mnesia:write(Updated_record),
-                Updated_record;
-            [] -> % didn't find 
-                not_found
-        end
-    end,
-    mnesia:activity(transaction, Fun).
-
-
-handle_player_move_request(State= #gn_state{}, {PlayerNum, Direction}) -> % TODO
-    %% todo: calculate destination coordinate
-    %% todo: check if that coordinate is under this GN's control or
-    %% todo: if yes: attempt player movement (as detailed in the todo for attempt_player_movement under handle_cast),
-    %% todo:         can't move: respond to player FSM 
-    %%                     player_fsm:gn_response(Player_record#mnesia_players.pid, {move_result, Answer});
-    %% todo:        can move: update mnesia table, open timer for halfway (when we update the player's position)
-    %% todo: if not: send message to CN - like below
-    gen_server:cast(cn_server, 
-        {query_request, get_registered_name(self()), 
-            {move_request_out_of_bounds, player, PlayerNum, Destination_coord, Direction}
-        }),
-    placeholder.
-
 
