@@ -14,7 +14,7 @@
 %% ? based on functionality. This file will include all functions relevant to a player requesting movement
 %% * it might also include a bomb requesting movement later on
 -export[handle_player_move_request/2, read_player_from_table/2, calc_new_coordinates/2,
-        attempt_player_movement/3, update_player_direction/3].
+        attempt_player_movement/3, update_player_direction/3, handle_player_movement_clearance/3, handle_bomb_movement_clearance/3].
 
 -export[get_managing_node_by_coord/2].
 -import(gn_server, [get_registered_name/1]).
@@ -165,3 +165,53 @@ update_player_direction(PlayerNum, Table, NewValue) ->
     end,
     mnesia:activity(transaction, Fun).
 
+
+    -spec handle_player_movement_clearance(PlayerNum::integer(), Answer::boolean(), Table_name::atom()) -> term().
+    handle_player_movement_clearance(PlayerNum, Answer, Table_name) ->
+        case Answer of
+            can_move ->
+                    %% move is possible. Update data, open halfway timer, respond to player FSM
+                    
+                    %% todo: update mnesia table - direction and movement
+                    %% todo: open timer for half-way (when we update the player's position)
+                    %% respond to the player FSM via CN->hosting GN
+                    case Player_record#mnesia_players.hosted of % ! Player_record is not defined here, used here for presentation purposes
+                        true -> 
+                            %% Player FSM is on this machine, send message directly
+                            player_fsm:gn_response(Player_record#mnesia_players.pid, {move_result, Answer}); 
+                        false ->
+                            %% Player FSM is on another machine, forward through CN->local GN
+                            gen_server:cast(cn_server,
+                                {forward_request, HostingGN, % ! HostingGN is placeholder - get it from the record returned by the function that's left todo 
+                                    {gn_answer, {move_result, player, PlayerNum, accepted}}
+                                })
+                    end;
+                    -
+            cant_move -> % cannot move to the other node
+                %% Update direction to none, send acknowledge to the player FSM
+                Player_record = req_player_move:update_player_direction(PlayerNum, Table_name, 'none'),
+                case {erlang:is_record(Player_record),Player_record#mnesia_players.hosted} of
+                    {true, true} ->
+                        %% Player FSM is on this machine, send message directly
+                        player_fsm:gn_response(Player_record#mnesia_players.pid, {move_result, Answer}); 
+                    {true, false} ->
+                        %% send message to player FSM through the CN -> hosting GN
+                        gen_Server:cast(cn_server,
+                            {forward_request, Player_record#mnesia_players.local_gn,
+                                {gn_answer, {move_result, player, PlayerNum, denied}}
+                            });
+                    {false,_} ->
+                        %% couldn't find the record, crash the process
+                        erlang:error(record_not_found, [node(), Player_record])
+                end
+            end,
+        
+        ok.
+
+    handle_bomb_movement_clearance(BombNum, Answer, Table_name) ->
+        case Answer of
+            can_move->
+                placeholder;
+            cant_move ->
+                placeholder
+        end.

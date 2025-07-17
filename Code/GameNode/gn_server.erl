@@ -142,48 +142,16 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
             end,
             {noreply, State};
 
-        %% * A GN got a respond for a movement request of a player to 
-        %% * another quarter - this is the forwarded response handler
-        %% * This deals with situations where the Player FSM is on the same node as the relevant GN and when its on another
+        %% * A GN got a respond for a movement request of a player/bomb to another quarter (separate pattern-matching) - this is the forwarded response handler
+        %% * This deals with situations where the Player FSM is on the same node as the relevant GN as well as when its on another
         {movement_clearance, player, PlayerNum, Answer} ->
-            case Answer of
-                can_move ->
-                    %% move is possible. Update data, open halfway timer, respond to player FSM
-                    
-                    %% todo: update mnesia table - direction and movement
-                    %% todo: open timer for half-way (when we update the player's position)
-                    %% respond to the player FSM via CN->hosting GN
-                    case Player_record#mnesia_players.hosted of % ! Player_record is not defined here, used here for presentation purposes
-                        true -> 
-                            %% Player FSM is on this machine, send message directly
-                            player_fsm:gn_response(Player_record#mnesia_players.pid, {move_result, Answer}); 
-                        false ->
-                            %% Player FSM is on another machine, forward through CN->local GN
-                            gen_server:cast(cn_server,
-                                {forward_request, HostingGN, % ! HostingGN is placeholder - get it from the record returned by the function that's left todo 
-                                    {gn_answer, {move_result, player, PlayerNum, accepted}}
-                                })
-                    end;
-                    
-                cant_move -> % cannot move to the other node
-                    %% Update direction to none, send acknowledge to the player FSM
-                    Player_record = req_player_move:update_player_direction(PlayerNum, State#gn_state.players_table_name, 'none'),
-                    case {is_record(Player_record),Player_record#mnesia_players.hosted} of
-                        {true, true} ->
-                            %% Player FSM is on this machine, send message directly
-                            player_fsm:gn_response(Player_record#mnesia_players.pid, {move_result, Answer}); 
-                        {true, false} ->
-                            %% send message to player FSM through the CN -> hosting GN
-                            gen_Server:cast(cn_server,
-                                {forward_request, Player_record#mnesia_players.local_gn,
-                                    {gn_answer, {move_result, player, PlayerNum, denied}}
-                                });
-                        {false,_} ->
-                            %% couldn't find the record, crash the process
-                            erlang:error(record_not_found, [node(), Player_record])
-                    end
-            end,
+            req_player_move:handle_player_movement_clearance(PlayerNum, Answer, State#gn_state.players_table_name), % todo - complete
             {noreply, State};
+
+        {movement_clearance, bomb, BombIdentifier, Answer} -> % todo
+            req_player_move:handle_bomb_movement_clearance(BombIdentifier, Answer, State#gn_state.bombs_table_name),
+            {noreply, State};
+
 
 
 handle_cast({move_request_out_of_bounds, EntityType, ActualRequest}, State) ->
@@ -205,7 +173,7 @@ handle_cast({move_request_out_of_bounds, EntityType, ActualRequest}, State) ->
     end,
     {noreply, State};
 
-handle_cast(_Request, State = #gn_state{}) ->
+handle_cast(_Request, State = #gn_state{}) -> 
     {noreply, State}.
 
 %% @doc Handling all non call/cast messages
