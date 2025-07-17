@@ -25,8 +25,8 @@
 
 
 -include_lib("mnesia_records.hrl").
--include_lib("src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl").
-
+%-include_lib("src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl").
+-include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl").
 
 %% todo: move this record (if it is even necessary) to the .hrl
 -record(gn_data, {
@@ -96,14 +96,25 @@ handle_cast({forward_request, Destination, Request}, State) ->
 handle_cast({query_request, AskingGN, Request}, State) ->
     %% * this below is the Request's contents
     case Request of
-        {move_request_out_of_bounds, player, PlayerNum, Destination_coord, Direction} ->
-        %% todo: find which GN oversees the coordinate, extract from Player's mnesia table the relevant buffs
-        %% todo: pass the appropriate GN the message {forwarded, {checking_movement_possibility, {playerID, Destination_coord, [relevant buffs], AskingGN}
-        gen_server:cast(TargetGN,
-            {move_request_out_of_bounds, player,
-                {PlayerNum, Destination_coord, Direction, [Buffs_from_table], AskingGN}
-            }),
-    {noreply, State};
+        {move_request_out_of_bounds, player, PlayerNum, [X,Y]=Destination_coord, Direction} ->
+        %% * finds which GN oversees the coordinate, extract from Player's mnesia table the relevant buffs
+        %% * pass the appropriate GN the message:
+        %% * {forwarded, {move_request_out_of_bounds, player, {playerNum, Destination_coord, Direction, [relevant buffs], AskingGN}
+            TargetGN = req_player_move:get_managing_node_by_coord(X, Y),
+            Players_table = lists:nth(req_player_move:node_name_to_number(TargetGN), State#gn_data.players),
+            Player_record = req_player_move:read_player_from_table(PlayerNum, Players_table),
+            case erlang:is_record(Player_record, mnesia_players) of
+                true -> 
+                    gen_server:cast(TargetGN,
+                        {move_request_out_of_bounds, player,
+                            {PlayerNum, Destination_coord, Direction, Player_record#mnesia_players.special_abilities, AskingGN}
+                    });   
+                false ->
+                    erlang:error(record_not_found, [node(), Player_record])
+            end,
+            {noreply, State}
+    end;
+
 
 %% @doc General cast messages - as of now ignored.
 handle_cast(_Msg, State) ->
@@ -139,27 +150,12 @@ generate_table_names(GN) ->
     [generate_atom_table_names(GN, "_tiles"), generate_atom_table_names(GN, "_bombs"),
         generate_atom_table_names(GN, "_powerups"), generate_atom_table_names(GN, "_players")].
 
-%% ! deprecated
-forward_requests(Request, Destination, State) ->
-    gen_server:cast(Destination, Request)
-
-        {player_message, {move_request, PlayerNum, TargetGN, Direction}} ->
-            gen_server:cast(TargetGN, {forwarded, {move_request, PlayerNum, Direction}});
-        
-        {gn_answer, HostingGN, Request} -> % answer back to the player FSM for move request
-        %% forwards message: {gn_answer, {move_request, accepted/denied, PlayerNum}
-            gen_server:cast(HostingGN, {gn_answer, Request});
-        _ -> placeholder % todo: other requests
-    
-        
-    end.
-
 
 
 %% ? I used this in earlier iteration, but changed the code where it was needed. Remove this comment if its used after-all
 find_pid_by_node(TargetNode, GNList) ->
     case lists:filter(
-        fun(#gn_data{pid = Pid}) -> node(Pid) =:= TargetGN end, State) of
+        fun(#gn_data{pid = Pid}) -> node(Pid) =:= TargetNode end, GNList) of
         
         [#gn_data{pid = Pid}] -> Pid;
         _ -> pid_not_found

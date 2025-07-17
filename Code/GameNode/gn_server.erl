@@ -21,7 +21,8 @@
 
 
 -include_lib("mnesia_records.hrl").
--include_lib("src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl"). %% ? This should work for compiling under rebar3.
+%%-include_lib("src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl"). %% ? This should work for compiling under rebar3.
+-include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl"). % ? windows fix
 
 %%%===================================================================
 %%% API
@@ -96,7 +97,7 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
             %% todo:            kicking/freezing bombs.
 
             %% extracts the player's record from mnesia's player table
-            Player#mnesia_players{} = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
+            Player = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
 
             %% Calculate destination coordinates
             Destination_coord = req_player_move:calc_new_coordinates(Player, Direction),
@@ -111,13 +112,13 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
                     %% todo: open timer for half-way (when we update the player's position)
                     %% respond to the player FSM via CN->hosting GN
                     gen_server:cast(cn_server,
-                        {forward_request, HostingGN, 
+                        {forward_request, Player#mnesia_players.local_gn, 
                             {gn_answer, {move_result, player, PlayerNum, accepted}}
                         });
 
                 cant_move -> % can't move, obstacle blocking
                     gen_server:cast(cn_server,
-                        {forward_request, HostingGN, 
+                        {forward_request, Player#mnesia_players.local_gn, 
                             {gn_answer, {move_result, player, PlayerNum, denied}}
                         });
 
@@ -133,12 +134,12 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
             %% Pass the message to the Player FSM
             %% Look for the player in your own records (to find his Pid)
             Player_record = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
-            case is_record(Player_record) of
+            case erlang:is_record(Player_record, mnesia_players) of 
                 true -> 
                     %% Everything as normal (found the record), pass the message
                     player_fsm:gn_response(Player_record#mnesia_players.pid, {move_result, Answer});
                 false -> % crash the process
-                    erlang:error(record_not_found, [node(), PlayerRecord])
+                    erlang:error(record_not_found, [node(), Player_record])
             end,
             {noreply, State};
 
@@ -150,7 +151,8 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
 
         {movement_clearance, bomb, BombIdentifier, Answer} -> % todo
             req_player_move:handle_bomb_movement_clearance(BombIdentifier, Answer, State#gn_state.bombs_table_name),
-            {noreply, State};
+            {noreply, State}
+    end;
 
 
 

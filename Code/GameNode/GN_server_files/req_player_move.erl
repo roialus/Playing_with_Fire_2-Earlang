@@ -16,8 +16,14 @@
 -export[handle_player_move_request/2, read_player_from_table/2, calc_new_coordinates/2,
         attempt_player_movement/3, update_player_direction/3, handle_player_movement_clearance/3, handle_bomb_movement_clearance/3].
 
--export[get_managing_node_by_coord/2].
+
+-export[get_managing_node_by_coord/2, node_name_to_number/1].
+-export[get_records_at_location/2].
+-export[handle_player_movement/3].
+
 -import(gn_server, [get_registered_name/1]).
+
+-include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/common_parameters.hrl").
 
 %%% ===========================================================================
 %%% ? BECAUSE WINDOWS IS ANNOYING WITH ERRORS IM INCLUDING THE RECORDS HERE
@@ -67,6 +73,22 @@
     last_request_time = 0  % timestamp of last GN request
 }).
 
+-record(mnesia_tiles, {
+    position, % position - [X,Y]
+    type, % can be - unbreakable, breakable, two_hit (-> one_hit)
+    contains,  % can be - none (no power-up), bomb (that'll trigger on its own), or any speed-up
+
+    pid = none
+}).
+
+-record(mnesia_powerups, {
+    position, % position - [X,Y]
+    type, % type of power up - can be movement speed, extra bombs etc..
+    original_node_ID, % original creating node ID - TODO: unsure of necessity
+
+    pid = none
+}).
+
 -record(mnesia_bombs, {
     position, % position - [X,Y]
     type, % type of bomb - regular / remote / repeating
@@ -81,7 +103,8 @@
 }).
 %%% ===========================================================================
 
-handle_player_move_request(State= #gn_state{}, {PlayerNum, Direction}) -> % TODO
+handle_player_move_request(_State= #gn_state{}, {PlayerNum, Direction}) -> % TODO
+%% ? pre clusterfuck solving
     %% todo: calculate destination coordinate
     %% todo: check if that coordinate is under this GN's control or
     %% todo: if yes: attempt player movement (as detailed in the todo for attempt_player_movement under handle_cast),
@@ -96,7 +119,7 @@ handle_player_move_request(State= #gn_state{}, {PlayerNum, Direction}) -> % TODO
     placeholder.
 
 
--spec read_player_from_table(PlayerNum::integer(), Table::atom()) -> #mnesia_players{}.
+-spec read_player_from_table(PlayerNum::integer(), Table::atom()) -> #mnesia_players{} | not_found.
 read_player_from_table(PlayerNum, Table) ->
     Fun = fun() ->
         case mnesia:read(Table, PlayerNum) of
@@ -122,9 +145,88 @@ calc_new_coordinates(Record, Direction) ->
         left -> [X-1, Y];
         right -> [X+1,Y]
     end.
+%% =====================================================================
+%% ? solving the clusterfuck for managing the movement check
 
+handle_player_movement(PlayerNum, Direction, State = #gn_state{}) ->
+    %% ? calculate the destination coordinate, find out if the coordinate is within limits of current GN (the one initiating the function call)
+    Player_record = read_player_from_table(PlayerNum, State#gn_state.players_table_name),
+    Destination = calc_new_coordinates(Player_record, Direction),
+    Current_gn_name = get_registered_name(self()),
+    case get_managing_node_by_coord(hd(Destination),lists:last(Destination)) of
+        Current_gn_name -> % destination coordinate is managed by this GN
+            %% ? Checks for obstacles in the target coordinate, kickstarting any movements caused by this attempt
+            check_for_obstacles(Destination, Player_record#mnesia_players.special_abilities, Direction, State);
+        _Other_name ->
+            dest_not_here
+    end.
+
+
+
+
+check_for_obstacles(Coordinate, BuffsList, Initiator_Direction, State = #gn_state{}) -> 
+    %% ? Fetch every entity in that coordinate using QLC
+    Entities_at_coord = get_records_at_location(Coordinate, State),
+    %% ? Deal with possible interactions
+    interact_with_entity(Entities_at_coord, BuffsList, Initiator_Direction),
+    ok.
+
+
+get_records_at_location(Coordinate, State = #gn_state{}) ->
+    Fun = fun() ->
+        qlc:eval(qlc:q(
+            qlc:append(
+                [ {tile, T} || T <- mnesia:table(State#gn_state.tiles_table_name), T#mnesia_tiles.position == Coordinate],
+                [ {bomb, B} || B <- mnesia:table(State#gn_state.bombs_table_name), B#mnesia_bombs.position == Coordinate],
+                [ {player, P} || P <- mnesia:table(State#gn_state.players_table_name), P#mnesia_players.position == Coordinate]
+            ))) end,
+        mnesia:activity(transaction, Fun).
+
+
+interact_with_entity(ListOfEntities, BuffsList, Direction) ->
+    %% this is the function called upon. rest are the recursion
+    interact_with_entity(ListOfEntities, BuffsList, Direction, can_move).
+
+interact_with_entity([], BuffsList, Direction, MoveStatus) -> MoveStatus;
+interact_with_entity([H|T], BuffsList, Direction, MoveStatus) ->
+    case H of
+        {tile, Tile} ->
+            %% no buffs help with running into a wall, movement request is denied
+            interact_with_entity(T, BuffsList, Direction, cant_move);
+        {bomb, Bomb} ->
+            %% check if can kick bombs, freeze them or phased movement, act accordingly
+            Relevant_buffs = [Buff || Buff <- BuffsList, lists:member(Buff, [?KICK_BOMB, ?PHASED, ?FREEZE_BOMB])],
+            case Relevant_buffs of
+                [] -> 
+                    %% no special buffs, can't push bomb, movement is denied
+                    interact_with_entity(T, BuffsList, Direction, cant_move);
+                [?KICK_BOMB] ->
+                    %% kick bomb special buff, tries to initiate a move for the bomb in the movement direction of the player
+                    Direction; %placeholder
+                [?PHASED] ->
+                    %% can move through bombs. does not cause the bomb to move, able to keep moving
+                    interact_with_entity(T, BuffsList, Direction, can_move);
+                [?FREEZE_BOMB] ->
+                    %% freezes the bomb, cannot move through it
+                    placeholder,
+                    interact_with_entity(T, BuffsList, Direction, cant_move)
+            end,
+            
+            ok;
+        {player, Other_player} ->
+            %% For now, cannot move through other players - same interaction as with a tile
+            interact_with_entity(T, BuffsList, Direction, MoveStatus)
+    end,
+    placeholder.
+
+
+
+
+%% =====================================================================
 
 attempt_player_movement(Player=#mnesia_players{}, Direction, State = #gn_state{}) ->
+%% ! integrated into handle_player_movement
+
         Current_gn_name = get_registered_name(self()),
         [X,Y] = Player#mnesia_players.position,
         case get_managing_node_by_coord(X,Y) of
@@ -149,6 +251,9 @@ get_managing_node_by_coord(X,Y) when X >= 0 , X =< 7 , Y >= 0 , Y =< 7 -> 'GN3_s
 get_managing_node_by_coord(X,Y) when X > 7 , X =< 15 , Y >= 0 , Y =< 7 -> 'GN4_server'.
 
 
+node_name_to_number(Name) ->
+    list_to_integer([lists:nth(3, atom_to_list(Name))]).
+
 
 -spec update_player_direction(PlayerNum::integer(), atom(), atom()) -> term().
 update_player_direction(PlayerNum, Table, NewValue) ->
@@ -166,47 +271,48 @@ update_player_direction(PlayerNum, Table, NewValue) ->
     mnesia:activity(transaction, Fun).
 
 
-    -spec handle_player_movement_clearance(PlayerNum::integer(), Answer::boolean(), Table_name::atom()) -> term().
-    handle_player_movement_clearance(PlayerNum, Answer, Table_name) ->
-        case Answer of
-            can_move ->
-                    %% move is possible. Update data, open halfway timer, respond to player FSM
-                    
-                    %% todo: update mnesia table - direction and movement
-                    %% todo: open timer for half-way (when we update the player's position)
-                    %% respond to the player FSM via CN->hosting GN
-                    case Player_record#mnesia_players.hosted of % ! Player_record is not defined here, used here for presentation purposes
-                        true -> 
-                            %% Player FSM is on this machine, send message directly
-                            player_fsm:gn_response(Player_record#mnesia_players.pid, {move_result, Answer}); 
-                        false ->
-                            %% Player FSM is on another machine, forward through CN->local GN
-                            gen_server:cast(cn_server,
-                                {forward_request, HostingGN, % ! HostingGN is placeholder - get it from the record returned by the function that's left todo 
-                                    {gn_answer, {move_result, player, PlayerNum, accepted}}
-                                })
-                    end;
-                    -
-            cant_move -> % cannot move to the other node
-                %% Update direction to none, send acknowledge to the player FSM
-                Player_record = req_player_move:update_player_direction(PlayerNum, Table_name, 'none'),
-                case {erlang:is_record(Player_record),Player_record#mnesia_players.hosted} of
-                    {true, true} ->
+
+handle_player_movement_clearance(PlayerNum, Answer, Table_name) ->
+    %% ? pre clusterfuck solving
+    case Answer of
+        can_move ->
+                %% move is possible. Update data, open halfway timer, respond to player FSM
+                
+                %% todo: update mnesia table - direction and movement
+                %% todo: open timer for half-way (when we update the player's position)
+                %% respond to the player FSM via CN->hosting GN
+                case Player_record#mnesia_players.hosted of % ! Player_record is not defined here, used here for presentation purposes
+                    true -> 
                         %% Player FSM is on this machine, send message directly
                         player_fsm:gn_response(Player_record#mnesia_players.pid, {move_result, Answer}); 
-                    {true, false} ->
-                        %% send message to player FSM through the CN -> hosting GN
-                        gen_Server:cast(cn_server,
-                            {forward_request, Player_record#mnesia_players.local_gn,
-                                {gn_answer, {move_result, player, PlayerNum, denied}}
-                            });
-                    {false,_} ->
-                        %% couldn't find the record, crash the process
-                        erlang:error(record_not_found, [node(), Player_record])
-                end
-            end,
-        
-        ok.
+                    false ->
+                        %% Player FSM is on another machine, forward through CN->local GN
+                        gen_server:cast(cn_server,
+                            {forward_request, Player_record#mnesia_players.local_gn, % ! HostingGN is placeholder - get it from the record returned by the function that's left todo 
+                                {gn_answer, {move_result, player, PlayerNum, accepted}}
+                            })
+                end;
+                
+        cant_move -> % cannot move to the other node
+            %% Update direction to none, send acknowledge to the player FSM
+            Player_record = req_player_move:update_player_direction(PlayerNum, Table_name, 'none'),
+            case {erlang:is_record(Player_record),Player_record#mnesia_players.hosted} of
+                {true, true} ->
+                    %% Player FSM is on this machine, send message directly
+                    player_fsm:gn_response(Player_record#mnesia_players.pid, {move_result, Answer}); 
+                {true, false} ->
+                    %% send message to player FSM through the CN -> hosting GN
+                    gen_Server:cast(cn_server,
+                        {forward_request, Player_record#mnesia_players.local_gn,
+                            {gn_answer, {move_result, player, PlayerNum, denied}}
+                        });
+                {false,_} ->
+                    %% couldn't find the record, crash the process
+                    erlang:error(record_not_found, [node(), Player_record])
+            end
+        end,
+    
+    ok.
 
     handle_bomb_movement_clearance(BombNum, Answer, Table_name) ->
         case Answer of
@@ -215,3 +321,6 @@ update_player_direction(PlayerNum, Table, NewValue) ->
             cant_move ->
                 placeholder
         end.
+
+
+
