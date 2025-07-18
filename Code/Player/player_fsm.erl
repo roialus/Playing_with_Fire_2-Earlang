@@ -23,9 +23,11 @@
 -define(DISCONNECT_TIMEOUT, 60000). % 60 seconds until process kill
 
 -record(player_data, {
+    %% ! this record was changed - we only stored data relevant to the operation of this process,
+    %% ! irrelevant stats are held in the appropriate mnesia table.
     % Player identification
     player_number,      % 1/2/3/4
-    position,          % [X, Y]
+    %% //position,          % [X, Y]
     direction, % desired direction movement - none/up/down/left/right
     movement, % false |{true,TimerRef}
          % todo: changed from next_position to movement&direction, verify consistency in the code
@@ -73,8 +75,8 @@ input_command(PlayerPid, Command) ->
     gen_statem:cast(PlayerPid, {input_command, Command}).
 
 %% @doc Send response from GN
-gn_response(PlayerPid, Response) ->
-    gen_statem:cast(PlayerPid, {gn_response, Response}).
+gn_response(PlayerNum, Response) ->
+    gen_statem:cast(list_to_atom("player_" ++ integer_to_list(PlayerNum)), {gn_response, Response}).
 
 %% @doc Inflict damage on player (from explosion)
 inflict_damage(PlayerPid) ->

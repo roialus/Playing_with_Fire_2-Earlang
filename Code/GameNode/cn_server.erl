@@ -116,10 +116,61 @@ handle_cast({query_request, AskingGN, Request}, State) ->
     end;
 
 
+handle_cast({transfer_records, player, PlayerNum, Current_GN, New_GN}, State) ->
+    Current_GN_players_table = lists:nth(req_player_move:node_name_to_number(Current_GN), State#gn_data.players),
+    New_GN_players_table = lists:nth(req_player_move:node_name_to_number(New_GN), State#gn_data.players),
+    {noreply, State};
+
+
+
 %% @doc General cast messages - as of now ignored.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+transfer_player_records(PlayerNum, Current_GN_table, New_GN_table, New_GN_name) ->
+    %% ! need to add the messaging (to update player FSM and to the GN so he opens the timer on his side)
+    Fun = fun() ->
+        case mnesia:read(Current_GN_table, PlayerNum, read) of
+          [Record] ->
+                Hosted = Record#mnesia_players.hosted,
+                New_record = Record#mnesia_players{
+                                hosted = false,
+                                target_gn = New_GN_name
+                },
+                case Hosted of
+                    true -> 
+                        ok = mnesia:write(New_GN_table, New_record, write);
+                    false ->
+                        %% the node we are leaving isn't the hosting one - delete from table
+                        ok = mnesia:delete(Current_GN_table, Record, write),
+                        case mnesia:read(New_GN_table, PlayerNum, write) of
+                            [] -> % the player isn't on the target GN table (because it isn't hosted there).
+                                ok = mnesia:write(New_GN_table, New_record, write);
+                            [_Existing] -> % Happens when we move to the physically-hosting node of this player
+                                mnesia:write(New_GN_table, New_record#mnesia_players{hosted=true}, write)
+                        end
+                end;
+        [] ->
+            {error, not_found}
+        end
+    end,
+    case mnesia:activity(transaction, Fun) of
+        {error, not_found} -> erlang:error(transfer_player_failed, [node(), PlayerNum]);
+        ok ->
+            gen_server:cast(New_GN_name, {incoming_player, PlayerNum})
+    end.
+
+                
+
+
+
+        
+
+
+        case mnesia:read(Current_GN_table, PlayerNum, read) of
+          [Record] ->
+            Hosted = Record#mnesia_players.hosted,
+            Body
 
 
 %%%================== handle info ==================

@@ -77,7 +77,23 @@ handle_cast({player_message, Request}, State = #gn_state{}) ->
     ThisGN = get_registered_name(self),
     case Request of
         {move_request, PlayerNum, ThisGN , Direction} -> % move request from a player in our quarter
-            req_player_move:handle_player_move_request(State, {PlayerNum, Direction}), % TODO - separate file
+            Move_verdict = req_player_move:handle_player_movement(PlayerNum, Direction, State),
+            case Move_verdict of
+                can_move ->
+                    req_player_move:insert_player_movement(PlayerNum, State#gn_state.players_table_name),
+                    player_fsm:gn_response(PlayerNum, {move_result, Move_verdict});
+                cant_move ->
+                    req_player_move:update_player_direction(PlayerNum, State#gn_state.players_table_name, none),
+                    player_fsm:gn_response(PlayerNum, {move_result, Move_verdict});
+                dest_not_here ->
+                    %% extracts the player's record from mnesia's player table
+                    Player = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
+                    %% Calculate destination coordinates
+                    Destination_coord = req_player_move:calc_new_coordinates(Player, Direction),
+                    gen_server:cast(cn_server,
+                        {query_request, get_registered_name(self()), 
+                            {move_request_out_of_bounds, player, PlayerNum, Destination_coord, Direction}})
+            end,
             {noreply, State};
         {move_request, PlayerNum, TargetGN, Direction} -> % move request from a player outside my quarter
             gen_server:cast(cn_server, {forward_request, TargetGN, {move_request, player, PlayerNum, Direction}}),
@@ -89,39 +105,27 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
     case Request of
         {move_request, player, PlayerNum, Direction} ->
             %% *  handles a move request of a player inside my quarter whose FSM is on another node
-            %% ?: handle this using several separated functions for maximal reusability
-            %% todo: Check if the destination coordinates is in the current GN's control -
-            %% todo: if it isn't: replies with 'dest_not_here'
-            %% todo: if it is: check the destination for obstacles (if the move is possible), this should return
-            %% todo             'can_move', 'cant_move' while also "kickstart" actions caused by the possible movement like
-            %% todo:            kicking/freezing bombs.
-
+            
             %% extracts the player's record from mnesia's player table
             Player = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
-
             %% Calculate destination coordinates
             Destination_coord = req_player_move:calc_new_coordinates(Player, Direction),
 
-
-            %% * as detailed in the massive todo above ^^
-            case req_player_move:attempt_player_movement(PlayerNum, Direction, State = #gn_state{}) of
+            case req_player_move:handle_player_movement(PlayerNum, Direction, State) of
                 can_move -> 
                     %% move is possible. Update data, open halfway timer, respond to player FSM
-
-                    %% todo: update mnesia table
-                    %% todo: open timer for half-way (when we update the player's position)
+                    req_player_move:insert_player_movement(PlayerNum, State#gn_state.players_table_name),
                     %% respond to the player FSM via CN->hosting GN
                     gen_server:cast(cn_server,
                         {forward_request, Player#mnesia_players.local_gn, 
                             {gn_answer, {move_result, player, PlayerNum, accepted}}
                         });
-
                 cant_move -> % can't move, obstacle blocking
+                    req_player_move:update_player_direction(PlayerNum, State#gn_state.players_table_name, none),
                     gen_server:cast(cn_server,
                         {forward_request, Player#mnesia_players.local_gn, 
                             {gn_answer, {move_result, player, PlayerNum, denied}}
                         });
-
                 dest_not_here -> % destination coordinate is overseen by another GN
                     gen_server:cast(cn_server,
                         {query_request, get_registered_name(self()), 
@@ -130,20 +134,20 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
             {noreply, State};
         
         %% * A GN who hosts a player (physically) receives a response for his movement request
-        {move_result, player, PlayerNum, Answer} ->
+        {gn_answer, {move_result, player, PlayerNum, Answer}} ->
             %% Pass the message to the Player FSM
             %% Look for the player in your own records (to find his Pid)
             Player_record = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
             case erlang:is_record(Player_record, mnesia_players) of 
                 true -> 
                     %% Everything as normal (found the record), pass the message
-                    player_fsm:gn_response(Player_record#mnesia_players.pid, {move_result, Answer});
+                    player_fsm:gn_response(PlayerNum, {move_result, Answer});
                 false -> % crash the process
                     erlang:error(record_not_found, [node(), Player_record])
             end,
             {noreply, State};
 
-        %% * A GN got a respond for a movement request of a player/bomb to another quarter (separate pattern-matching) - this is the forwarded response handler
+        %% * A GN got a respond for a movement request of a player/bomb to another quarter (separate pattern-matching) - this is the forwarded reply handler
         %% * This deals with situations where the Player FSM is on the same node as the relevant GN as well as when its on another
         {movement_clearance, player, PlayerNum, Answer} ->
             req_player_move:handle_player_movement_clearance(PlayerNum, Answer, State#gn_state.players_table_name), % todo - complete
@@ -151,30 +155,50 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
 
         {movement_clearance, bomb, BombIdentifier, Answer} -> % todo
             req_player_move:handle_bomb_movement_clearance(BombIdentifier, Answer, State#gn_state.bombs_table_name),
+            {noreply, State};
+
+        %% ** Forwarded messages regarding the actual movement update for a player
+        {update_coords, player, PlayerNum, New_coord} ->
+            %% pass the message to the player FSM
+            Player_record = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
+            case erlang:is_record(Player_record, mnesia_players) of 
+                true -> 
+                    %% Everything as normal (found the record), pass the message
+                    player_fsm:gn_response(PlayerNum, {update_coords, New_coord});
+                false -> % crash the process
+                    erlang:error(record_not_found, [node(), Player_record])
+            end,
             {noreply, State}
+
+        
+        
     end;
 
 
-
+%% * received a move request to the quarter of this GN from another GN - differntiate bomb from player
 handle_cast({move_request_out_of_bounds, EntityType, ActualRequest}, State) ->
-    %% handling a move request from another GN
-    %% differntiate bomb to player
     case EntityType of
         player -> % a player wants to pass to this GN
             {PlayerNum, Destination_coord, Direction, BuffsList, AskingGN} = ActualRequest,
-            ReplyingGN = get_registered_name(self()),
-            %% todo: check destination coordinate for obstacles (if the move is possible),
-            %% todo: this should also "kickstart" any action caused by this attempted movement
-            %% todo: returns "can_move" or "cant_move"
-            %% * this function should be similar to attempt_player_movement, but slightly different
-            Move_result = attempt_player_entrance(Destination_coord, Direction, BuffsList, State),
-                gen_server:cast(cn_server, {forward_request, AskingGN,
-                    {movement_clearance, player, PlayerNum, Move_result}});
+            %% checks destination coordinate for obstacles (if the move is possible),
+            %% this should also "kickstart" any action caused by this attempted movement
+            Move_result = req_player_move:check_for_obstables(Destination_coord, BuffsList, Direction, State),
+            gen_server:cast(cn_server, {forward_request, AskingGN,
+                {movement_clearance, player, PlayerNum, Move_result}});
         bomb -> % a bomb wants to pass to this GN
             placeholder %! not yet implemented
     end,
     {noreply, State};
 
+
+%% * A player came into my quarter of the map - open a timer, let the player FSM know
+handle_cast({incoming_player, PlayerNum}, State) ->
+    %% ! I need a different timeout message from this timer. Need to modify that function to know how to deal with 2 options - initial/halfway
+    req_player_move:insert_player_movement(PlayerNum, State#gn_state.players_table_name),
+    {noreply, State};
+
+
+%% * this is a catch-all&ignore clause
 handle_cast(_Request, State = #gn_state{}) -> 
     {noreply, State}.
 
@@ -183,6 +207,36 @@ handle_cast(_Request, State = #gn_state{}) ->
     {noreply, NewState :: #gn_state{}} |
     {noreply, NewState :: #gn_state{}, timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: #gn_state{}}).
+
+
+%% * Timer for actually changing the player coordinates expired
+%% todo: update mnesia table, then check if the player needs to move a GN:
+%% todo:    if it stays within this GN - set another timer for finishing the move, let player FSM know
+%% todo:    if it doesn't stay - update coordinate, send msg to CN to move the table to the relevant GN, let
+%% todo:            FSM know of the coord change and and target_gn change
+handle_info({update_coord, player, PlayerNum}, State = #gn_state{}) ->
+        case req_player_move:read_and_update_coord(player, PlayerNum, State#gn_state.players_table_name) of
+            not_found -> % got an error somewhere, crash the process. this is mostly for debugging as of now
+                erlang:error(failure_when_updating_record, [node(), PlayerNum]);
+            {same_gn, Player_record, New_coord} ->
+                if 
+                    Player_record#mnesia_players.target_gn == Player_record#mnesia_players.local_gn ->
+                        %% player FSM is on the same machine as the GN
+                        player_fsm:gn_reponse(PlayerNum, {update_coords, New_coord});
+                    true ->
+                        %% player FSM is on another machine, forward message through CN->local GN
+                        gen_server:cast(cn_server,
+                            {forward_request, Player_record#mnesia_players.local_gn,
+                                {update_coords, player, PlayerNum, New_coord}})
+                end;
+            {switch_gn, _Player_record, Current_GN, New_GN} ->
+                gen_server:cast(cn_server,
+                    {transfer_records, player, PlayerNum, Current_GN, New_GN})
+        end,
+        {noreply, State};
+
+
+%% * default, catch-all and ignore
 handle_info(_Info, State = #gn_state{}) ->
 {noreply, State}.
 
@@ -233,7 +287,6 @@ initialize_tiles(TableName) ->
 
 -spec initialize_players(TableName:: atom(), PlayerType:: atom(), GN_number::1|2|3|4) -> term().
 initialize_players(TableName, PlayerType, GN_number) ->
-    %% //Player_name = list_to_atom("player_" ++ integer_to_list(GN_number)),
     %% start io_handler gen_server
     {ok, IO_pid} = io_handler:start_link(GN_number, PlayerType),
     Fun = fun() ->
