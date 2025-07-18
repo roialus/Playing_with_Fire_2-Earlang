@@ -33,6 +33,7 @@
     status = normal, % can be - normal / frozen
     radius = 1, % blast radius on a + shape - number is how many blocks away the explosion is felt
     movement = false, % false / {true, TimerRef}
+    direction = none, % none/up/down/left/right
     owner = none, % player name/ID (?) of whoever placed the bomb. 'none' is for a bomb that fell from a broken tile (or simply no owner)
     gn_pid, % GN Pid who oversees this process
 
