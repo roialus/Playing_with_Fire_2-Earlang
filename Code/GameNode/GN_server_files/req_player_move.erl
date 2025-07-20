@@ -102,6 +102,7 @@ calc_new_coordinates(Record, Direction) ->
 %% ? solving the clusterfuck for managing the movement check
 
 %% @doc returns can_move/cant_move/dest_not_here
+%% @doc returns can_move/cant_move/dest_not_here
 handle_player_movement(PlayerNum, Direction, State = #gn_state{}) ->
     %% ? calculate the destination coordinate, find out if the coordinate is within limits of current GN (the one initiating the function call)
     Player_record = read_player_from_table(PlayerNum, State#gn_state.players_table_name),
@@ -156,14 +157,22 @@ get_records_at_location(Coordinate, State = #gn_state{}) ->
 
 -spec interact_with_entity(list(), list(), up|down|left|right, #gn_state{}) -> can_move|cant_move.
 interact_with_entity(ListOfEntities, BuffsList, Direction, State) ->
+-spec interact_with_entity(list(), list(), up|down|left|right, #gn_state{}) -> can_move|cant_move.
+interact_with_entity(ListOfEntities, BuffsList, Direction, State) ->
     %% this is the function called upon. rest are the recursion
+    interact_with_entity(ListOfEntities, BuffsList, Direction, State, can_move).
     interact_with_entity(ListOfEntities, BuffsList, Direction, State, can_move).
 
 -spec interact_with_entity(list(), list(), up|down|left|right, State::#gn_state{}, MoveStatus:: can_move|cant_move) 
     -> can_move|cant_move.
 interact_with_entity([], _BuffsList, _Direction, _State, MoveStatus) -> MoveStatus;
 interact_with_entity([H|T], BuffsList, Direction, State, MoveStatus) ->
+-spec interact_with_entity(list(), list(), up|down|left|right, State::#gn_state{}, MoveStatus:: can_move|cant_move) 
+    -> can_move|cant_move.
+interact_with_entity([], _BuffsList, _Direction, _State, MoveStatus) -> MoveStatus;
+interact_with_entity([H|T], BuffsList, Direction, State, MoveStatus) ->
     case H of
+        {tile, _Tile} ->
         {tile, _Tile} ->
             %% no buffs help with running into a wall, movement request is denied
             interact_with_entity(T, BuffsList, Direction, cant_move);
@@ -181,6 +190,11 @@ interact_with_entity([H|T], BuffsList, Direction, State, MoveStatus) ->
                         {bomb_kicked, Bomb, Direction}
                     ), % ! prototype for the message format - sends to GN
                     interact_with_entity(T, BuffsList, Direction, cant_move);
+                    %% ?: send message to self, prompting a bomb's movement request
+                    gen_server:cast(self(), 
+                        {bomb_kicked, Bomb, Direction}
+                    ), % ! prototype for the message format - sends to GN
+                    interact_with_entity(T, BuffsList, Direction, cant_move);
                 [?PHASED] ->
                     %% can move through bombs. does not cause the bomb to move, able to keep moving
                     interact_with_entity(T, BuffsList, Direction, can_move);
@@ -190,10 +204,15 @@ interact_with_entity([H|T], BuffsList, Direction, State, MoveStatus) ->
                     bomb_as_fsm:freeze_bomb(Bomb#mnesia_bombs.pid),
                     %% update the mnesia table 
                     update_bomb_status(Bomb, State#gn_state.bombs_table_name),
+                    %% let the bomb know
+                    bomb_as_fsm:freeze_bomb(Bomb#mnesia_bombs.pid),
+                    %% update the mnesia table 
+                    update_bomb_status(Bomb, State#gn_state.bombs_table_name),
                     interact_with_entity(T, BuffsList, Direction, cant_move)
             end,
             
             ok;
+        {player, _Other_player} ->
         {player, _Other_player} ->
             %% For now, cannot move through other players - same interaction as with a tile
             interact_with_entity(T, BuffsList, Direction, MoveStatus)
@@ -201,6 +220,14 @@ interact_with_entity([H|T], BuffsList, Direction, State, MoveStatus) ->
     placeholder.
 
 
+%% * re-read the bomb and update status to frozen on mnesia table
+update_bomb_status(Bomb, Bombs_table) ->
+    BombKey = Bomb#mnesia_bombs.position,
+    Fun = fun() ->
+        [CurrentRecord] = mnesia:wread({Bombs_table, BombKey}),
+        mnesia:write(Bombs_table, CurrentRecord#mnesia_bombs{status = frozen}, write)
+    end,
+    mnesia:activity(transaction, Fun).
 %% * re-read the bomb and update status to frozen on mnesia table
 update_bomb_status(Bomb, Bombs_table) ->
     BombKey = Bomb#mnesia_bombs.position,
@@ -240,7 +267,23 @@ update_player_direction(PlayerNum, Table, NewValue) ->
 
 
 %% @doc handles the operations needed to be done after given a reply for a movement clearance request to another GN for a player
+%% @doc handles the operations needed to be done after given a reply for a movement clearance request to another GN for a player
 handle_player_movement_clearance(PlayerNum, Answer, Table_name) ->
+    %% since both options (can_move/cant_move) send a reply to the player FSM based on his location - this is done first
+    %% Then the database update occurs (different for both)
+    Player_record = read_player_from_table(PlayerNum, Table_name),
+    %% respond to the player FSM
+    if
+        Player_record#mnesia_players.target_gn == Player_record#mnesia_players.local_gn ->
+            %% Player FSM is on this node, send message directly
+            player_fsm:gn_response(PlayerNum, {move_result, Answer}); 
+        true ->
+            %% Player FSM is on another machine, forward through CN->local GN
+            gen_server:cast(cn_server,
+                {forward_request, Player_record#mnesia_players.local_gn,
+                    {gn_answer, {move_result, player, PlayerNum, accepted}}
+                })
+    end,
     %% since both options (can_move/cant_move) send a reply to the player FSM based on his location - this is done first
     %% Then the database update occurs (different for both)
     Player_record = read_player_from_table(PlayerNum, Table_name),
@@ -265,12 +308,26 @@ handle_player_movement_clearance(PlayerNum, Answer, Table_name) ->
             case erlang:is_record(update_player_direction(PlayerNum, Table_name, 'none'), mnesia_players) of
                 true -> ok;
                 _ -> 
+            %% Update direction to none
+            case erlang:is_record(update_player_direction(PlayerNum, Table_name, 'none'), mnesia_players) of
+                true -> ok;
+                _ -> 
                     %% couldn't find the record, crash the process
                     erlang:error(record_not_found, [node(), Player_record])
             end
     end.
 
+    end.
 
+
+handle_bomb_movement_clearance(_BombNum, Answer, _Table_name) -> % todo
+    %% ! BumbNum and Table_name are "unused" for now to remove warnings until I finish this function
+    case Answer of
+        can_move->
+            placeholder;
+        cant_move ->
+            placeholder
+    end.
 handle_bomb_movement_clearance(_BombNum, Answer, _Table_name) -> % todo
     %% ! BumbNum and Table_name are "unused" for now to remove warnings until I finish this function
     case Answer of
