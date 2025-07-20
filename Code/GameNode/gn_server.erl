@@ -21,8 +21,10 @@
 
 
 -include_lib("mnesia_records.hrl").
-%%-include_lib("src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl"). %% ? This should work for compiling under rebar3.
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl"). % ? windows fix
+%%% Linux compatible
+-include_lib("src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl").
+%%% Windows compatible
+%-include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl").
 
 %%%===================================================================
 %%% API
@@ -54,6 +56,7 @@ init([GN_number, PlayerType]) ->
     initialize_players(Data#gn_state.players_table_name, PlayerType, GN_number),
     {ok, Data}.
 
+%%% ============== Handle call ==============
 
 %% @doc Handling call messages
 -spec(handle_call(Request :: term(), From :: {pid(), Tag :: term()},
@@ -67,6 +70,7 @@ init([GN_number, PlayerType]) ->
 handle_call(_Request, _From, State = #gn_state{}) ->
     {reply, ok, State}.
 
+%%% ============== Handle cast ==============
 
 -spec(handle_cast(Request :: term(), State :: #gn_state{}) ->
     {noreply, NewState :: #gn_state{}} |
@@ -74,14 +78,14 @@ handle_call(_Request, _From, State = #gn_state{}) ->
     {stop, Reason :: term(), NewState :: #gn_state{}}).
 %% @doc Handle player requests
 handle_cast({player_message, Request}, State = #gn_state{}) ->
-    ThisGN = get_registered_name(self),
+    ThisGN = get_registered_name(self()),
     case Request of
         {move_request, PlayerNum, ThisGN , Direction} -> % move request from a player in our quarter
             Move_verdict = req_player_move:handle_player_movement(PlayerNum, Direction, State),
             case Move_verdict of
                 can_move ->
                     req_player_move:insert_player_movement(PlayerNum, State#gn_state.players_table_name),
-                    player_fsm:gn_response(PlayerNum, {move_result, Move_verdict});
+                    player_fsm:gn_response(PlayerNum, {move_result, Move_verdict}); %% ? this should be removed later on. Stays here for debugging for now
                 cant_move ->
                     req_player_move:update_player_direction(PlayerNum, State#gn_state.players_table_name, none),
                     player_fsm:gn_response(PlayerNum, {move_result, Move_verdict});
@@ -156,6 +160,7 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
             req_player_move:handle_bomb_movement_clearance(BombIdentifier, Answer, State#gn_state.bombs_table_name),
             {noreply, State};
 
+        %% ! ***REMOVE***
         %% ** Forwarded messages regarding the actual movement update for a player
         {update_coords, player, PlayerNum, New_coord} ->
             %% pass the message to the player FSM
@@ -167,8 +172,12 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
                 false -> % crash the process
                     erlang:error(record_not_found, [node(), Player_record])
             end,
-            {noreply, State}
+            {noreply, State};
 
+        %% * A player has changed coordinates, resulting in a target GN change.
+        %% * this message is sent by the previous GN to let the player FSM update his target
+        {new_target_gn, player, PlayerNum, New_GN} ->
+            player_fsm:gn_response(PlayerNum, {new_target_gn, New_GN})
         
         
     end;
@@ -182,8 +191,9 @@ handle_cast({move_request_out_of_bounds, EntityType, ActualRequest}, State) ->
             %% checks destination coordinate for obstacles (if the move is possible),
             %% this should also "kickstart" any action caused by this attempted movement
             Move_result = req_player_move:check_for_obstables(Destination_coord, BuffsList, Direction, State),
-            gen_server:cast(cn_server, {forward_request, AskingGN,
-                {movement_clearance, player, PlayerNum, Move_result}});
+            gen_server:cast(cn_server, 
+                {forward_request, AskingGN,
+                    {movement_clearance, player, PlayerNum, Move_result}});
         bomb -> % a bomb wants to pass to this GN
             placeholder %! not yet implemented
     end,
@@ -192,14 +202,16 @@ handle_cast({move_request_out_of_bounds, EntityType, ActualRequest}, State) ->
 
 %% * A player came into my quarter of the map - open a timer, let the player FSM know
 handle_cast({incoming_player, PlayerNum}, State) ->
-    %% ! I need a different timeout message from this timer. Need to modify that function to know how to deal with 2 options - initial/halfway
-    req_player_move:insert_player_movement(PlayerNum, State#gn_state.players_table_name),
+    Player_record = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
+    req_player_move:check_entered_coord(Player_record), % TODO - not written yet!
     {noreply, State};
 
 
 %% * this is a catch-all&ignore clause
 handle_cast(_Request, State = #gn_state{}) -> 
     {noreply, State}.
+
+%%% ============== Handle info ==============
 
 %% @doc Handling all non call/cast messages
 -spec(handle_info(Info :: timeout() | term(), State :: #gn_state{}) ->
@@ -208,29 +220,38 @@ handle_cast(_Request, State = #gn_state{}) ->
     {stop, Reason :: term(), NewState :: #gn_state{}}).
 
 
-%% * Timer for actually changing the player coordinates expired
-%% todo: update mnesia table, then check if the player needs to move a GN:
-%% todo:    if it stays within this GN - set another timer for finishing the move, let player FSM know
-%% todo:    if it doesn't stay - update coordinate, send msg to CN to move the table to the relevant GN, let
-%% todo:            FSM know of the coord change and and target_gn change
+%% * Timer for finishing a movement by the player has expired.
+%% * Checks if the player stays in current GNs boundaries
+%% * If it changes GNs, transfer the players table entry to the new GN, and update the Player FSM of that change
+%% * Regardless, checks destination for power-ups/explosions
 handle_info({update_coord, player, PlayerNum}, State = #gn_state{}) ->
         case req_player_move:read_and_update_coord(player, PlayerNum, State#gn_state.players_table_name) of
             not_found -> % got an error somewhere, crash the process. this is mostly for debugging as of now
                 erlang:error(failure_when_updating_record, [node(), PlayerNum]);
-            {same_gn, Player_record, New_coord} ->
+            {same_gn, Player_record} ->
                 if 
                     Player_record#mnesia_players.target_gn == Player_record#mnesia_players.local_gn ->
                         %% player FSM is on the same machine as the GN
-                        player_fsm:gn_reponse(PlayerNum, {update_coords, New_coord});
-                    true ->
-                        %% player FSM is on another machine, forward message through CN->local GN
-                        gen_server:cast(cn_server,
-                            {forward_request, Player_record#mnesia_players.local_gn,
-                                {update_coords, player, PlayerNum, New_coord}})
+                        req_player_move:check_entered_coord(Player_record); % TODO - not written yet!
+                    true -> %% player FSM is on another machine, forward message through CN->local GN
+                        ok 
                 end;
-            {switch_gn, _Player_record, Current_GN, New_GN} ->
+            {switch_gn, Player_record, Current_GN, New_GN} ->
+                %% transfer records to new GN
                 gen_server:cast(cn_server,
-                    {transfer_records, player, PlayerNum, Current_GN, New_GN})
+                    {transfer_records, player, PlayerNum, Current_GN, New_GN}),
+                %% Let player FSM know of the GN change
+                Player_local_gn = Player_record#mnesia_players.local_gn,
+                %% Check where Player FSM is physically - current node or someplace else
+                case get_registered_name(self()) of
+                    Player_local_gn -> %% player FSM on this node
+                        player_fsm:gn_response(PlayerNum, {new_target_gn, New_GN});
+                    _ -> %% Player FSM on another node
+                        gen_server:cast(cn_server,
+                            {forward_request, Player_local_gn, 
+                                {new_target_gn, player, PlayerNum, New_GN}})
+                        
+                end
         end,
         {noreply, State};
 

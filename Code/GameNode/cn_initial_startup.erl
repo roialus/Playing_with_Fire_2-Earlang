@@ -334,8 +334,7 @@ init_player([X,Y], PlayerID) ->
             player_number = list_to_integer([lists:nth(8, atom_to_list(PlayerID))]),
             position = [X,Y],
             direction = none,
-            movement = false,
-            hosted = true % every player always starts at his own GN's quarter
+            movement = false
         },
         case PlayerID of
             'player_1' ->

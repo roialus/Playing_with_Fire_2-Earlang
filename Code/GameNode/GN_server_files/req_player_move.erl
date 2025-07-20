@@ -24,20 +24,27 @@
 
 -import(gn_server, [get_registered_name/1]).
 
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/common_parameters.hrl").
 
 %%% ===========================================================================
-%%% ? BECAUSE WINDOWS IS ANNOYING WITH ERRORS IM INCLUDING THE RECORDS HERE
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/GameNode/mnesia_records.hrl").
-%-include_lib("src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl"). %% This should work for compiling under rebar3.
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl"). %% windows fix
+%% ? Imports for windows:
+%-include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/common_parameters.hrl").
+%-include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/GameNode/mnesia_records.hrl").
+%-include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl"). %% windows fix
 
-
+%% ? imports for linux:
+-include_lib("src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl"). %% This should work for compiling under rebar3.
+-include_lib("src/Playing_with_Fire_2-Earlang/Code/GameNode/mnesia_records.hrl").
+-include_lib("src/Playing_with_Fire_2-Earlang/Code/Objects/common_parameters.hrl").
 %%% ===========================================================================
 
+%% @doc Updates coordinate after a movement timer expires.
+%% If new coord. is within the same GN - update position, direction and movement
+%%      then check for collisions in the new coordinate. (*not in this function)
+%% else - Send message to player FSM to update his targetGN, update position, direction and movement in record, 
+%%      and request CN to tranfer the player entry to the new GN's table, who at last asks the new GN to check for collisions (*not in this function)
 read_and_update_coord(player, PlayerNum, Table) ->
     Fun = fun() ->
-        case mnesia:read(Table, PlayerNum, sticky_write) of
+        case mnesia:read(Table, PlayerNum, write) of
             [Player_record = #mnesia_players{}] -> 
                 [New_x, New_y] = calc_new_coordinates(Player_record, Player_record#mnesia_players.direction),
                 Current_gn_name = get_registered_name(self()),
@@ -45,23 +52,23 @@ read_and_update_coord(player, PlayerNum, Table) ->
                 %% check if new coordinate fall within current managing GN
                 case get_managing_node_by_coord(New_x,New_y) of
                     Current_gn_name -> % destination coordinate is managed by this GN
-                        %% update position and set another timer for finishing the movement
-                        %% ? should we check for collisions at this point? against explosions?
+                        %% update position, reset direction and movement
                         Updated_record = Player_record#mnesia_players{
                             position = [New_x, New_y],
-                            movement = {true, erlang:send_after(?HALFWAY_TILE, self(), {update_coord, player, PlayerNum})}
+                            movement = false,
+                            direction = none
                         },
+                        %% ? should we check for collisions at this point? against explosions?
                         mnesia:write(Updated_record),
-                        {same_gn, Player_record, [New_x, New_y]}; %% return value, used to let the player FSM know of the position change.
+                        {same_gn, Player_record}; %% return value to calling function
                     Other_name -> %% destination coordinate is managed by another GN (=Other_name)
-                    %% *update position & target_gn name (in mnesia table!)
-                    %% *send msg to CN to move tables and update them
-                    %% todo: New GN has to:
-                    %% - update movement field with new timer from his process
-                    %% - send message to player FSM - updating the position and the target_gn he needs to contact
+                    %% update position, target_gn name, reset movement and direction
+                    %% ask CN to transfer entry between tables
                         Updated_record = Player_record#mnesia_players{
                             position = [New_x, New_y],
-                            target_gn = Other_name
+                            target_gn = Other_name,
+                            movement = false,
+                            direction = none
                         },
                         mnesia:write(Updated_record),
                         {switch_gn, Player_record, Current_gn_name, Other_name} %% return value
@@ -131,7 +138,7 @@ insert_player_movement(PlayerNum, Table) ->
         case mnesia:read(Table, PlayerNum, sticky_write) of
             [Player_record = #mnesia_players{}] ->
                 Updated_record = Player_record#mnesia_players{
-                    movement = {true, erlang:send_after(?HALFWAY_TILE, self(), {update_coord, player, PlayerNum})}
+                    movement = {true, erlang:send_after(?TILE_MOVE div Player_record#mnesia_players.speed, self(), {update_coord, player, PlayerNum})}
                     },
                 %% Insert updated record into table
                 mnesia:write(Updated_record),
@@ -241,7 +248,8 @@ update_player_direction(PlayerNum, Table, NewValue) ->
 
 %% @doc handles the operations needed to be done after given a reply for a movement clearance request to another GN for a player
 handle_player_movement_clearance(PlayerNum, Answer, Table_name) ->
-    %% since both options (can_move/cant_move) send a reply to the player FSM based on his location - this is done first
+    %% ? For debugging purposes ONLY, we are letting the player FSM know of approved move requests. Later on should be only if they are denied
+    %% both options (can_move/cant_move) send a reply to the player FSM based on his location - this is done first,
     %% Then the database update occurs (different for both)
     Player_record = read_player_from_table(PlayerNum, Table_name),
     %% respond to the player FSM
@@ -253,12 +261,12 @@ handle_player_movement_clearance(PlayerNum, Answer, Table_name) ->
             %% Player FSM is on another machine, forward through CN->local GN
             gen_server:cast(cn_server,
                 {forward_request, Player_record#mnesia_players.local_gn,
-                    {gn_answer, {move_result, player, PlayerNum, accepted}}
+                    {gn_answer, {move_result, player, PlayerNum, Answer}}
                 })
     end,
     case Answer of
         can_move ->
-            %% move is possible. Update data, open halfway timer
+            %% move is possible. Update data, open movement timer
             insert_player_movement(PlayerNum, Table_name);
         cant_move -> % cannot move to the other node
             %% Update direction to none
@@ -272,7 +280,7 @@ handle_player_movement_clearance(PlayerNum, Answer, Table_name) ->
 
 
 handle_bomb_movement_clearance(_BombNum, Answer, _Table_name) -> % todo
-    %% ! BumbNum and Table_name are "unused" for now to remove warnings until I finish this function
+    %% ! BombNum and Table_name are "unused" for now to remove warnings until I finish this function
     case Answer of
         can_move->
             placeholder;

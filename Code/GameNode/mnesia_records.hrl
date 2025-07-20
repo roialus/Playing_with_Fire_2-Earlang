@@ -54,9 +54,6 @@
     position, % [X,Y]
     direction, % desired direction movement - none/up/down/left/right
     movement, % false |{true,TimerRef}
-
-    % * Exclusive to the mnesia record - not on the player FSM
-    hosted = false, % true/false - whether the player is physically playing on this computer (where the GN record is)
     
     % Process info
     % //request_cooldown = 0,   % milliseconds until next GN request allowed

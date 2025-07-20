@@ -25,8 +25,8 @@
 
 
 -include_lib("mnesia_records.hrl").
-%-include_lib("src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl").
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl").
+-include_lib("src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl").
+%-include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl").
 
 %% todo: move this record (if it is even necessary) to the .hrl
 -record(gn_data, {
@@ -115,11 +115,16 @@ handle_cast({query_request, AskingGN, Request}, State) ->
             {noreply, State}
     end;
 
-
+%% * handles a player transfer from one GN to another
 handle_cast({transfer_records, player, PlayerNum, Current_GN, New_GN}, State) ->
     Current_GN_players_table = lists:nth(req_player_move:node_name_to_number(Current_GN), State#gn_data.players),
     New_GN_players_table = lists:nth(req_player_move:node_name_to_number(New_GN), State#gn_data.players),
-    %% todo: finish this = needs to call transfer_player_records
+    case transfer_player_records(PlayerNum, Current_GN_players_table, New_GN_players_table) of
+        {error, not_found} -> erlang:error(transfer_player_failed, [node(), PlayerNum]);
+        ok -> 
+            %% Message the new GN to check for collisions
+            gen_server:cast(New_GN,{incoming_player, PlayerNum})
+    end,
     {noreply, State};
 
 
@@ -128,38 +133,7 @@ handle_cast({transfer_records, player, PlayerNum, Current_GN, New_GN}, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-transfer_player_records(PlayerNum, Current_GN_table, New_GN_table, New_GN_name) ->
-    %% ! need to add the messaging (to update player FSM and to the GN so he opens the timer on his side)
-    Fun = fun() ->
-        case mnesia:read(Current_GN_table, PlayerNum, read) of
-          [Record] ->
-                Hosted = Record#mnesia_players.hosted,
-                New_record = Record#mnesia_players{
-                                hosted = false,
-                                target_gn = New_GN_name
-                },
-                case Hosted of
-                    true -> 
-                        ok = mnesia:write(New_GN_table, New_record, write);
-                    false ->
-                        %% the node we are leaving isn't the hosting one - delete from table
-                        ok = mnesia:delete(Current_GN_table, Record, write),
-                        case mnesia:read(New_GN_table, PlayerNum, write) of
-                            [] -> % the player isn't on the target GN table (because it isn't hosted there).
-                                ok = mnesia:write(New_GN_table, New_record, write);
-                            [_Existing] -> % Happens when we move to the physically-hosting node of this player
-                                mnesia:write(New_GN_table, New_record#mnesia_players{hosted=true}, write)
-                        end
-                end;
-        [] ->
-            {error, not_found}
-        end
-    end,
-    case mnesia:activity(transaction, Fun) of
-        {error, not_found} -> erlang:error(transfer_player_failed, [node(), PlayerNum]);
-        ok ->
-            gen_server:cast(New_GN_name, {incoming_player, PlayerNum})
-    end.
+
 
                 
 
@@ -202,3 +176,20 @@ find_pid_by_node(TargetNode, GNList) ->
         [#gn_data{pid = Pid}] -> Pid;
         _ -> pid_not_found
     end.
+
+
+%% @doc Transfers a player's mnesia table from one GN to another
+transfer_player_records(PlayerNum, Current_GN_table, New_GN_table) ->
+    Fun = fun() ->
+        %% Read entry from current GN
+        case mnesia:read(Current_GN_table, PlayerNum, read) of
+          [Record] ->
+                %% delete from table from the GN we are leaving
+                ok = mnesia:delete(Current_GN_table, Record, write),
+                %% Write the data to the new GN's table
+                mnesia:write(New_GN_table, Record, write);
+        [] ->
+            {error, not_found}
+        end
+    end,
+    mnesia:activity(transaction, Fun).

@@ -14,7 +14,7 @@
 -define(FREEZE_DELAY, 2000).
 -define(TICK_DELAY, 50).
 -define(HALFWAY_TILE, 350). % time to complete half the movement - the switching point between tiles
-
+-define(TILE_MOVE, 700).
 
 %% Naming convention for powerups
 %% Power-up definitions (atoms)
