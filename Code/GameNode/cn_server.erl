@@ -119,6 +119,7 @@ handle_cast({query_request, AskingGN, Request}, State) ->
 handle_cast({transfer_records, player, PlayerNum, Current_GN, New_GN}, State) ->
     Current_GN_players_table = lists:nth(req_player_move:node_name_to_number(Current_GN), State#gn_data.players),
     New_GN_players_table = lists:nth(req_player_move:node_name_to_number(New_GN), State#gn_data.players),
+    %% todo: finish this = needs to call transfer_player_records
     {noreply, State};
 
 
@@ -161,16 +162,6 @@ transfer_player_records(PlayerNum, Current_GN_table, New_GN_table, New_GN_name) 
     end.
 
                 
-
-
-
-        
-
-
-        case mnesia:read(Current_GN_table, PlayerNum, read) of
-          [Record] ->
-            Hosted = Record#mnesia_players.hosted,
-            Body
 
 
 %%%================== handle info ==================

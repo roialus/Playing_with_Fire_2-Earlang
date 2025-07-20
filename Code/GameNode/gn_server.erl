@@ -105,14 +105,11 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
     case Request of
         {move_request, player, PlayerNum, Direction} ->
             %% *  handles a move request of a player inside my quarter whose FSM is on another node
-            
-            
             %% extracts the player's record from mnesia's player table
             Player = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
             %% Calculate destination coordinates
             Destination_coord = req_player_move:calc_new_coordinates(Player, Direction),
 
-            case req_player_move:handle_player_movement(PlayerNum, Direction, State) of
             case req_player_move:handle_player_movement(PlayerNum, Direction, State) of
                 can_move -> 
                     %% move is possible. Update data, open halfway timer, respond to player FSM
@@ -123,7 +120,6 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
                             {gn_answer, {move_result, player, PlayerNum, accepted}}
                         });
                 cant_move -> % can't move, obstacle blocking
-                    req_player_move:update_player_direction(PlayerNum, State#gn_state.players_table_name, none),
                     req_player_move:update_player_direction(PlayerNum, State#gn_state.players_table_name, none),
                     gen_server:cast(cn_server,
                         {forward_request, Player#mnesia_players.local_gn, 
@@ -145,17 +141,15 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
                 true -> 
                     %% Everything as normal (found the record), pass the message
                     player_fsm:gn_response(PlayerNum, {move_result, Answer});
-                    player_fsm:gn_response(PlayerNum, {move_result, Answer});
                 false -> % crash the process
                     erlang:error(record_not_found, [node(), Player_record])
             end,
             {noreply, State};
 
         %% * A GN got a respond for a movement request of a player/bomb to another quarter (separate pattern-matching) - this is the forwarded reply handler
-        %% * A GN got a respond for a movement request of a player/bomb to another quarter (separate pattern-matching) - this is the forwarded reply handler
         %% * This deals with situations where the Player FSM is on the same node as the relevant GN as well as when its on another
         {movement_clearance, player, PlayerNum, Answer} ->
-            req_player_move:handle_player_movement_clearance(PlayerNum, Answer, State#gn_state.players_table_name), % todo - complete
+            req_player_move:handle_player_movement_clearance(PlayerNum, Answer, State#gn_state.players_table_name),
             {noreply, State};
 
         {movement_clearance, bomb, BombIdentifier, Answer} -> % todo
@@ -180,7 +174,6 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
     end;
 
 
-%% * received a move request to the quarter of this GN from another GN - differntiate bomb from player
 %% * received a move request to the quarter of this GN from another GN - differntiate bomb from player
 handle_cast({move_request_out_of_bounds, EntityType, ActualRequest}, State) ->
     case EntityType of
