@@ -224,6 +224,7 @@ handle_cast(_Request, State = #gn_state{}) ->
 %% * Checks if the player stays in current GNs boundaries
 %% * If it changes GNs, transfer the players table entry to the new GN, and update the Player FSM of that change
 %% * Regardless, checks destination for power-ups/explosions
+%% ! explosions are a tricky thing - for now im not going to do it; the explosion checks everything in its radius when it explodes and that's it
 handle_info({update_coord, player, PlayerNum}, State = #gn_state{}) ->
         case req_player_move:read_and_update_coord(player, PlayerNum, State#gn_state.players_table_name) of
             not_found -> % got an error somewhere, crash the process. this is mostly for debugging as of now
@@ -232,7 +233,7 @@ handle_info({update_coord, player, PlayerNum}, State = #gn_state{}) ->
                 if 
                     Player_record#mnesia_players.target_gn == Player_record#mnesia_players.local_gn ->
                         %% player FSM is on the same machine as the GN
-                        req_player_move:check_entered_coord(Player_record); % TODO - not written yet!
+                        req_player_move:check_entered_coord(Player_record, State); % TODO - not written yet!
                     true -> %% player FSM is on another machine, forward message through CN->local GN
                         ok 
                 end;

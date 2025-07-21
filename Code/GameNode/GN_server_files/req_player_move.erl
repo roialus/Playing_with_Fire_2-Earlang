@@ -21,6 +21,7 @@
 -export[get_records_at_location/2, interact_with_entity/4].
 -export[handle_player_movement/3, insert_player_movement/2, check_for_obstacles/4].
 -export[read_and_update_coord/3].
+-export[check_entered_coord/2].
 
 -import(gn_server, [get_registered_name/1]).
 
@@ -108,7 +109,6 @@ calc_new_coordinates(Record, Direction) ->
 %% =====================================================================
 %% ? solving the clusterfuck for managing the movement check
 
-%% @doc returns can_move/cant_move/dest_not_here
 %% @doc returns can_move/cant_move/dest_not_here
 handle_player_movement(PlayerNum, Direction, State = #gn_state{}) ->
     %% ? calculate the destination coordinate, find out if the coordinate is within limits of current GN (the one initiating the function call)
@@ -287,3 +287,21 @@ handle_bomb_movement_clearance(_BombNum, Answer, _Table_name) -> % todo
         cant_move ->
             placeholder
     end.
+
+-spec check_entered_coord(#mnesia_players{}, State::#gn_state{}) -> ok.
+check_entered_coord(Player_record, State) ->
+    %% TODO: Check for powerups in new position, if any are found - add their effect to the player's mnesia table entry
+    %% TODO: When a powerup is taken it is sent a a 'pickup(Pid)' command to stop & terminate it.
+    %% TODO: this powerup entry is removed from the mnesia table
+    %% TODO:    (by GN while sending that message / triggered by the termination msg from the powerup process?)
+    %% 
+    %% TODO: Player FSM should be notified of the following powerup changes: max bombs, speed, (?) lives
+    
+
+
+    ok.
+
+%% TODO: general things to do when working:
+%% 1. Consolidate the define macros across the board (powerup names, timing macros' names etc.)
+%% 2. write check_entered_coord
+%% 3. Re-write Player FSM to our new needs, update its internal player record

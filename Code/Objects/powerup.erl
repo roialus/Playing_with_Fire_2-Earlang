@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/3]).
+-export([start_link/3, pickup/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -33,10 +33,14 @@
         'extra_life') ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link(Pos_x, Pos_y, Type) ->
-    Server_name = list_to_atom("powerup_" ++ integer_to_list(Pos_x) ++ "_" ++ integer_to_list(Pos_y)),
+    Name = list_to_atom("powerup_" ++ integer_to_list(Pos_x) ++ "_" ++ integer_to_list(Pos_y)),
     % registers *locally* as atom called 'tile_X_Y' (X,Y - numbers indicating location)
     % TODO: maybe there's no need to register, but just hold at the GN a database of the position, type and Pid of tiles
-    gen_server:start_link({local, Server_name}, ?MODULE, [[Pos_x, Pos_y], Type, node()], []).
+    gen_server:start_link({local, Name}, ?MODULE, [[Pos_x, Pos_y], Type, node()], []).
+
+
+pickup(Pid) ->
+    gen_server:cast(Pid, stop).
 
 %%%===================================================================
 %%% gen_server callbacks
