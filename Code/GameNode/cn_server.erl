@@ -25,7 +25,8 @@
 
 
 -include_lib("mnesia_records.hrl").
--include_lib("src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl").
+-include_lib("src/clean-repo/Code/common_parameters.hrl").
+-include_lib("src/clean-repo/Code/Objects/object_records.hrl").
 %-include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl").
 
 %% todo: move this record (if it is even necessary) to the .hrl

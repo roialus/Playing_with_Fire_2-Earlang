@@ -17,6 +17,9 @@
 %% State functions
 -export([idle/3, waiting_gn_response/3, immunity/3, dead/3, disconnected/3]).
 
+% linux compatible
+-include_lib("src/clean-repo/Code/common_parameters.hrl").
+
 -define(TICK, 50). % tick time 50 ms
 -define(REQUEST_COOLDOWN, 100). % cooldown between requests to GN (MAYBE TO CHANGE)
 -define(IMMUNITY_TIME, 2000). % 2 seconds immunity after damage

@@ -25,8 +25,8 @@
 
 %% Parameters Definitions
 -define(SERVER, ?MODULE).
--include("common_parameters.hrl").
 -include("object_records.hrl").
+-include_lib("src/clean-repo/Code/common_parameters.hrl").
 
 
 %%%===================================================================

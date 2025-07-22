@@ -33,9 +33,9 @@
 %-include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl"). %% windows fix
 
 %% ? imports for linux:
--include_lib("src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl"). %% This should work for compiling under rebar3.
--include_lib("src/Playing_with_Fire_2-Earlang/Code/GameNode/mnesia_records.hrl").
--include_lib("src/Playing_with_Fire_2-Earlang/Code/Objects/common_parameters.hrl").
+-include_lib("src/clean-repo/Code/Objects/object_records.hrl"). %% This should work for compiling under rebar3.
+-include_lib("src/clean-repo/Code/GameNode/mnesia_records.hrl").
+-include_lib("src/clean-repo/Code/common_parameters.hrl").
 %%% ===========================================================================
 
 %% @doc Updates coordinate after a movement timer expires.
@@ -297,11 +297,31 @@ check_entered_coord(Player_record, State) ->
     %% 
     %% TODO: Player FSM should be notified of the following powerup changes: max bombs, speed, (?) lives
     
+    Fun = fun() ->
+        case mnesia:read(State#gn_state.powerups_table_name, Player_record#mnesia_players.position, write) of
+            [] -> ?NO_POWERUP;
+            [Found_powerup] -> % a powerup is present at the new position of the player
+                %% add powerup to the player (separate function), remove current powerup from table, send msg to process to terminate
+                mnesia:delete(State#gn_state.powerups_table_name, Found_powerup, write), % remove powerup from table
+                powerup:pickup(Found_powerup#mnesia_powerups.pid), % send msg to terminate process
+                Found_powerup#mnesia_powerups.type
+        end
+        end,
+        Powerup = mnesia:activity(transaction, Fun),
+        if
+            Powerup == ?NO_POWERUP -> ok; % no powerup found in position
+            true -> % consume power-up into player, notify player for selected powerups
+                consume_powerup(Powerup, Player_record, State#gn_state.players_table_name)
+        end.
 
 
+
+consume_powerup(Powerup, Player_record, Players_table) ->
+    %% TODO: based on current player's powerups, change/update his power in the mnesia table.
+    %% TODO: Notify the player FSM 
+        
     ok.
 
 %% TODO: general things to do when working:
-%% 1. Consolidate the define macros across the board (powerup names, timing macros' names etc.)
 %% 2. write check_entered_coord
 %% 3. Re-write Player FSM to our new needs, update its internal player record

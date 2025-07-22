@@ -17,7 +17,9 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
     code_change/3]).
 
--define(TICK, 50). % Input polling interval
+% linux compatible
+-include_lib("src/clean-repo/Code/common_parameters.hrl").
+
 
 -record(io_state, {
     player_pid = none,              % Player FSM PID
@@ -58,7 +60,7 @@ init([PlayerNumber, KeyboardMode]) ->
     
     % Start input polling if in keyboard mode
     case KeyboardMode of
-        true -> erlang:send_after(?TICK, self(), poll_input);
+        true -> erlang:send_after(?TICK_DELAY, self(), poll_input);
         false -> ok
     end,
     
@@ -107,7 +109,7 @@ handle_info(poll_input, State) ->
     end,
     
     % Schedule next poll
-    erlang:send_after(?TICK, self(), poll_input),
+    erlang:send_after(?TICK_DELAY, self(), poll_input),
     {noreply, NewState};
 
 handle_info(_Info, State) ->

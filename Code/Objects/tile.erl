@@ -18,7 +18,8 @@
     code_change/3]).
 
 %-define(SERVER, ?MODULE).
--include("common_parameters.hrl").
+% linux compatible
+-include_lib("src/clean-repo/Code/common_parameters.hrl").
 
 -include("object_records.hrl").
 
@@ -36,7 +37,7 @@
 start_link(Pos_x, Pos_y, Type, Contains) ->
     Server_name = list_to_atom("tile_" ++ integer_to_list(Pos_x) ++ "_" ++ integer_to_list(Pos_y)),
     % registers *locally* as atom called 'tile_X_Y' (X,Y - numbers indicating location)
-    % TODO: maybe there's no need to register, but just hold at the GN a database of the position, type and Pid of tiles
+    % ? maybe there's no need to register, but just hold at the GN a database of the position, type and Pid of tiles
     gen_server:start_link({local, Server_name}, ?MODULE, [[Pos_x, Pos_y], Type, Contains], []).
 
 %%%===================================================================
