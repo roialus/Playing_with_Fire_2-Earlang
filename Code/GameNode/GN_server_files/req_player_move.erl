@@ -28,14 +28,14 @@
 
 %%% ===========================================================================
 %% ? Imports for windows:
-%-include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/common_parameters.hrl").
-%-include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/GameNode/mnesia_records.hrl").
-%-include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl"). %% windows fix
+-include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/common_parameters.hrl").
+-include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/GameNode/mnesia_records.hrl").
+-include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl"). %% windows fix
 
 %% ? imports for linux:
--include_lib("src/clean-repo/Code/Objects/object_records.hrl"). %% This should work for compiling under rebar3.
--include_lib("src/clean-repo/Code/GameNode/mnesia_records.hrl").
--include_lib("src/clean-repo/Code/common_parameters.hrl").
+%-include_lib("src/clean-repo/Code/Objects/object_records.hrl"). %% This should work for compiling under rebar3.
+%-include_lib("src/clean-repo/Code/GameNode/mnesia_records.hrl").
+%-include_lib("src/clean-repo/Code/common_parameters.hrl").
 %%% ===========================================================================
 
 %% @doc Updates coordinate after a movement timer expires.
@@ -299,29 +299,76 @@ check_entered_coord(Player_record, State) ->
     
     Fun = fun() ->
         case mnesia:read(State#gn_state.powerups_table_name, Player_record#mnesia_players.position, write) of
+            %% reads any powerups in the position of the playr
             [] -> ?NO_POWERUP;
+            [?NO_POWERUP] -> ?NO_POWERUP;
             [Found_powerup] -> % a powerup is present at the new position of the player
-                %% add powerup to the player (separate function), remove current powerup from table, send msg to process to terminate
+                %% remove current powerup from table, send msg to process to terminate
                 mnesia:delete(State#gn_state.powerups_table_name, Found_powerup, write), % remove powerup from table
                 powerup:pickup(Found_powerup#mnesia_powerups.pid), % send msg to terminate process
-                Found_powerup#mnesia_powerups.type
+                Found_powerup#mnesia_powerups.type % returns the powerup (from the transaction)
         end
         end,
         Powerup = mnesia:activity(transaction, Fun),
         if
             Powerup == ?NO_POWERUP -> ok; % no powerup found in position
             true -> % consume power-up into player, notify player for selected powerups
+            %% todo: add powerup to the player (separate function)
                 consume_powerup(Powerup, Player_record, State#gn_state.players_table_name)
         end.
 
 
 
 consume_powerup(Powerup, Player_record, Players_table) ->
-    %% TODO: based on current player's powerups, change/update his power in the mnesia table.
-    %% TODO: Notify the player FSM 
-        
-    ok.
+    %% * Based on current player's powerups, change/update his power in the mnesia table.
+    %% TODO: Notify the player FSM for certain updates
+    Updated_record = case Powerup of
+        %% Powerups that the player FSM should be notified about
+        ?MOVE_SPEED -> % movespeed buff
+            %% TODO: send a message to the Player FSM to notify them
+            Player_record#mnesia_players{speed = Player_record#mnesia_players.speed + 1};
+        ?PLUS_LIFE -> % extra life
+            %% TODO: send a message to the Player FSM to notify them
+            Player_record#mnesia_players{life = Player_record#mnesia_players.life + 1};
+        ?PLUS_BOMBS -> % increase max bombs
+            %% TODO: send a message to the Player FSM to notify them
+            Player_record#mnesia_players{bombs = Player_record#mnesia_players.bombs + 1};
+
+        %% General powerups - no conflict when consuming them
+        ?BIGGER_EXPLOSION -> % increase explosion radius
+            Player_record#mnesia_players{explosion_radius = Player_record#mnesia_players.explosion_radius + 1};
+
+        %% Bomb interaction - replaces conflicting buffs present in the player
+        ?KICK_BOMB -> % kicking a bomb upon colliding with them
+            Updated_buffs = remove_other_buffs([?KICK_BOMB, ?FREEZE_BOMB, ?PHASED], Player_record#mnesia_players.special_abilities, ?KICK_BOMB),
+            Player_record#mnesia_players{special_abilities = Updated_buffs};
+        ?FREEZE_BOMB -> % freezing a bomb upon colliding with them
+            Updated_buffs = remove_other_buffs([?KICK_BOMB, ?FREEZE_BOMB, ?PHASED], Player_record#mnesia_players.special_abilities, ?FREEZE_BOMB),
+            Player_record#mnesia_players{special_abilities = Updated_buffs};
+        ?PHASED -> % passing through a bomb upon colliding with them
+            Updated_buffs = remove_other_buffs([?KICK_BOMB, ?FREEZE_BOMB, ?PHASED], Player_record#mnesia_players.special_abilities, ?PHASED),
+            Player_record#mnesia_players{special_abilities = Updated_buffs};
+        %% Bomb type - replaces other types with new one
+        ?REMOTE_IGNITION -> % remote bombs
+            Updated_buffs = remove_other_buffs([?REMOTE_IGNITION, ?REPEAT_BOMBS, ?REGULAR_BOMB], Player_record#mnesia_players.special_abilities, ?REMOTE_IGNITION),
+            Player_record#mnesia_players{special_abilities = Updated_buffs};
+        ?REPEAT_BOMBS -> % repeating bombs
+            Updated_buffs = remove_other_buffs([?REMOTE_IGNITION, ?REPEAT_BOMBS, ?REGULAR_BOMB], Player_record#mnesia_players.special_abilities, ?REPEAT_BOMBS),
+            Player_record#mnesia_players{special_abilities = Updated_buffs}
+
+    end,
+    Fun = fun() ->
+        mnesia:write(Players_table, Updated_record, write) end,
+    mnesia:activity(interaction, Fun).
+
+
+
+remove_other_buffs(ToRemove, BuffList, NewBuff) ->
+    [NewBuff | lists:filter(fun(Buff) -> not lists:member(Buff, ToRemove) end, BuffList)].
+    
+
 
 %% TODO: general things to do when working:
-%% 2. write check_entered_coord
+%% 2. Finish writing consume_powerup (part of check_entered_coord)
 %% 3. Re-write Player FSM to our new needs, update its internal player record
+%% 4. Implement bomb explosion mechanism (msg passing, checking 'real' explosion radius, inflicting dmg..

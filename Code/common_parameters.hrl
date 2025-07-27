@@ -38,6 +38,7 @@
 -define(BIGGER_EXPLOSION, bigger_explosion).
 -define(PLUS_LIFE, plus_life).
 -define(FREEZE_BOMB, freeze_bomb).
+-define(REGULAR_BOMB, normal_bomb).
 
 %% Bomb type definitions
 -define(NO_BOMB, none).
