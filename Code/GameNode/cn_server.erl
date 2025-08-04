@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 % API
--export([start_link/1]).
+-export([start_link/1, get_connection_status/0]).
 -import(gn_server, [generate_atom_table_names/2]). % to not have to specify the import everytime
 
 %% gen_server callbacks
@@ -46,6 +46,19 @@ start_link(GN_playmode_list) ->
     % * GN_playmode_list = [{1, true}, {2, false}, ... ]
     gen_server:start_link({global, ?MODULE}, ?MODULE, [GN_playmode_list], [{priority, max}]). 
 
+%% @doc Get the connection status of CN server and count of connected GN servers
+get_connection_status() ->
+    try
+        gen_server:call({global, ?MODULE}, get_connection_status, 5000)
+    catch
+        exit:{noproc, _} ->
+            {error, cn_not_running};
+        exit:{timeout, _} ->
+            {error, timeout};
+        _:_ ->
+            {error, connection_failed}
+    end.
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -78,7 +91,12 @@ init([GN_playmode_list]) -> % [ {GN_number, Answer, NodeID} , {..} ]
     {ok, CN_data}.
 
 %%%================== handle call ==================
-%% @doc 
+%% @doc Handle connection status requests
+handle_call(get_connection_status, _From, State) ->
+    ConnectedCount = count_alive_gns(State),
+    {reply, {ok, ConnectedCount}, State};
+
+%% @doc General call handler
 handle_call(_Request, _From, State) ->
     {reply, ignored, State}.
 
@@ -101,7 +119,7 @@ handle_cast({query_request, AskingGN, Request}, State) ->
         %% * pass the appropriate GN the message:
         %% * {forwarded, {move_request_out_of_bounds, player, {playerNum, Destination_coord, Direction, [relevant buffs], AskingGN}
             TargetGN = req_player_move:get_managing_node_by_coord(X, Y),
-            Players_table = lists:nth(req_player_move:node_name_to_number(TargetGN), State#gn_data.players),
+            Players_table = lists:nth(req_player_move:node_name_to_number(TargetGN), State)#gn_data.players,
             Player_record = req_player_move:read_player_from_table(PlayerNum, Players_table),
             case erlang:is_record(Player_record, mnesia_players) of
                 true -> 
@@ -117,8 +135,8 @@ handle_cast({query_request, AskingGN, Request}, State) ->
 
 %% * handles a player transfer from one GN to another
 handle_cast({transfer_records, player, PlayerNum, Current_GN, New_GN}, State) ->
-    Current_GN_players_table = lists:nth(req_player_move:node_name_to_number(Current_GN), State#gn_data.players),
-    New_GN_players_table = lists:nth(req_player_move:node_name_to_number(New_GN), State#gn_data.players),
+    Current_GN_players_table = lists:nth(req_player_move:node_name_to_number(Current_GN), State)#gn_data.players,
+    New_GN_players_table = lists:nth(req_player_move:node_name_to_number(New_GN), State)#gn_data.players,
     case transfer_player_records(PlayerNum, Current_GN_players_table, New_GN_players_table) of
         {error, not_found} -> erlang:error(transfer_player_failed, [node(), PlayerNum]);
         ok -> 
@@ -142,9 +160,17 @@ handle_cast(_Msg, State) ->
 
 %% @doc Handles failure messages from the monitored processes
 handle_info({'DOWN', Ref, process, Pid, Reason} , Data=[GN1=#gn_data{}, GN2=#gn_data{}, GN3=#gn_data{}, GN4=#gn_data{}]) -> 
-    %% todo: placeholder
-    io:format("*CN: monitored process ~w with ref ~w failed, reason:~w~n",[Pid,Ref,Reason]),
-    {noreply, Data};
+    %% Update the failed GN's data to mark it as disconnected
+    UpdatedData = lists:map(fun(GN_Data) ->
+        case GN_Data#gn_data.ref of
+            Ref -> 
+                io:format("*CN: monitored process ~w with ref ~w failed, reason:~w~n",[Pid,Ref,Reason]),
+                GN_Data#gn_data{pid = undefined, ref = undefined}; % Mark as disconnected
+            _ -> 
+                GN_Data
+        end
+    end, Data),
+    {noreply, UpdatedData};
 
 %% @doc General messages received as info - as of now ignored.
 handle_info(_Info, State) ->
@@ -166,7 +192,19 @@ generate_table_names(GN) ->
     [generate_atom_table_names(GN, "_tiles"), generate_atom_table_names(GN, "_bombs"),
         generate_atom_table_names(GN, "_powerups"), generate_atom_table_names(GN, "_players")].
 
-
+%% @doc Count how many GN servers are currently alive
+count_alive_gns(State) ->
+    lists:foldl(fun(GN_Data, Acc) ->
+        case GN_Data#gn_data.pid of
+            undefined -> Acc; % GN is disconnected
+            Pid when is_pid(Pid) -> 
+                case is_process_alive(Pid) of
+                    true -> Acc + 1;
+                    false -> Acc
+                end;
+            _ -> Acc
+        end
+    end, 0, State).
 
 %% ? I used this in earlier iteration, but changed the code where it was needed. Remove this comment if its used after-all
 find_pid_by_node(TargetNode, GNList) ->
