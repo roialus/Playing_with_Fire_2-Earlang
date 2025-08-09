@@ -9,7 +9,7 @@
 -module(player_fsm).
 -behaviour(gen_statem).
 
--export([start_link/5, input_command/2, gn_response/2, inflict_damage/1]).
+-export([start_link/5, start_link/6, input_command/2, gn_response/2, inflict_damage/1, set_bot_difficulty/2]).
 
 %% gen_statem callbacks
 -export([callback_mode/0, init/1, terminate/3, code_change/4]).
@@ -21,6 +21,11 @@
 -define(REQUEST_COOLDOWN, 100). % cooldown between requests to GN (MAYBE TO CHANGE)
 -define(IMMUNITY_TIME, 2000). % 2 seconds immunity after damage
 -define(DISCONNECT_TIMEOUT, 60000). % 60 seconds until process kill
+
+%% Bot-specific constants
+-define(MIN_ACTION_DELAY, 300).  % Minimum delay between bot actions (ms)
+-define(MAX_ACTION_DELAY, 800).  % Maximum delay between bot actions (ms)
+-define(BOMB_PROBABILITY, 0.15). % Base probability of dropping bomb vs moving
 
 -record(player_data, {
     %% ! this record was changed - we only stored data relevant to the operation of this process,
@@ -45,6 +50,12 @@
     disconnected = 0,     % counter to 60 (seconds), then kill process
     bot = false,         % true/false - is this a bot player
     
+    % Bot-specific fields
+    bot_difficulty = easy,  % easy, medium, hard
+    bot_last_action = none, % Last action taken by bot
+    bot_action_count = 0,   % Number of actions taken by bot
+    bot_bomb_cooldown = 0,  % Cooldown before next bomb
+    
     % Default stats
     life = 3,
     speed = 1,           % movement speed
@@ -66,9 +77,15 @@
 -spec start_link(PlayerNumber::integer(), StartPos::[integer()], GN_Pid::pid(), IsBot::boolean(), IO_pid::pid()) ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}.
 start_link(PlayerNumber, StartPos, GN_Pid, IsBot, IO_pid) ->
+    start_link(PlayerNumber, StartPos, GN_Pid, IsBot, IO_pid, easy).
+
+%% @doc Spawns the player FSM with bot difficulty
+-spec start_link(PlayerNumber::integer(), StartPos::[integer()], GN_Pid::pid(), IsBot::boolean(), IO_pid::pid(), BotDifficulty::atom()) ->
+    {ok, Pid :: pid()} | ignore | {error, Reason :: term()}.
+start_link(PlayerNumber, StartPos, GN_Pid, IsBot, IO_pid, BotDifficulty) ->
     ServerName = list_to_atom("player_" ++ integer_to_list(PlayerNumber)),
     gen_statem:start_link({local, ServerName}, ?MODULE, 
-        [PlayerNumber, StartPos, GN_Pid, IsBot, IO_pid], []).
+        [PlayerNumber, StartPos, GN_Pid, IsBot, IO_pid, BotDifficulty], []).
 
 %% @doc Send input command from I/O handler
 input_command(PlayerPid, Command) ->
@@ -82,7 +99,9 @@ gn_response(PlayerNum, Response) ->
 inflict_damage(PlayerPid) ->
     gen_statem:cast(PlayerPid, inflict_damage).
 
-
+%% @doc Set bot difficulty during runtime
+set_bot_difficulty(PlayerPid, Difficulty) ->
+    gen_statem:cast(PlayerPid, {set_bot_difficulty, Difficulty}).
 
 %%%===================================================================
 %%% gen_statem callbacks
@@ -91,7 +110,7 @@ inflict_damage(PlayerPid) ->
 callback_mode() ->
     state_functions.
 
-init([PlayerNumber, StartPos, GN_Pid, IsBot, IO_pid]) ->
+init([PlayerNumber, StartPos, GN_Pid, IsBot, IO_pid, BotDifficulty]) ->
     {_, GN_registered_name} = process_info(GN_Pid, registered_name),
     Data = #player_data{
         player_number = PlayerNumber,
@@ -102,6 +121,7 @@ init([PlayerNumber, StartPos, GN_Pid, IsBot, IO_pid]) ->
         pid = self(),
         local_gn_pid = GN_Pid,
         bot = IsBot,
+        bot_difficulty = BotDifficulty,
         io_handler_pid = IO_pid
     },
     
@@ -110,7 +130,7 @@ init([PlayerNumber, StartPos, GN_Pid, IsBot, IO_pid]) ->
     
     % If bot, start bot behavior
     case IsBot of
-        true -> erlang:send_after(500, self(), bot_action);
+        true -> schedule_bot_action(Data);
         false -> ok
     end,
     
@@ -147,6 +167,14 @@ idle(cast, inflict_damage, Data) ->
             {next_state, dead, NewData}
     end;
 
+idle(cast, {set_bot_difficulty, Difficulty}, Data) when Data#player_data.isBot ->
+    NewData = Data#player_data{bot_difficulty = Difficulty},
+    {keep_state, NewData};
+
+idle(cast, {set_bot_difficulty, _Difficulty}, Data) ->
+    % Not a bot, ignore
+    {keep_state, Data};
+
 idle(info, tick, Data) ->
     handle_tick(Data);
 
@@ -171,6 +199,10 @@ waiting_gn_response(cast, inflict_damage, Data) ->
     % Can still take damage while waiting for GN response
     idle(cast, inflict_damage, Data);
 
+waiting_gn_response(cast, {set_bot_difficulty, Difficulty}, Data) when Data#player_data.bot ->
+    NewData = Data#player_data{bot_difficulty = Difficulty},
+    {keep_state, NewData};
+
 waiting_gn_response(info, tick, Data) ->
     handle_tick(Data);
 
@@ -187,6 +219,10 @@ immunity(cast, {gn_response, Response}, Data) ->
 immunity(cast, inflict_damage, Data) ->
     % Immune to damage - ignore damage
     {keep_state, Data};
+
+immunity(cast, {set_bot_difficulty, Difficulty}, Data) when Data#player_data.bot ->
+    NewData = Data#player_data{bot_difficulty = Difficulty},
+    {keep_state, NewData};
 
 immunity(info, immunity_end, Data) ->
     % Immunity period ended
@@ -214,6 +250,10 @@ dead(cast, {gn_response, _Response}, Data) ->
 dead(cast, inflict_damage, Data) ->
     % Already dead
     {keep_state, Data};
+
+dead(cast, {set_bot_difficulty, Difficulty}, Data) when Data#player_data.bot ->
+    NewData = Data#player_data{bot_difficulty = Difficulty},
+    {keep_state, NewData};
 
 dead(info, respawn, Data) ->
     % Respawn logic (if implemented)
@@ -356,23 +396,33 @@ handle_gn_response(Response, Data) ->
 handle_tick(Data) ->
     % Reduce cooldown
     NewCooldown = max(0, Data#player_data.request_cooldown - ?TICK),
-    NewData = Data#player_data{request_cooldown = NewCooldown}, 
+    % Reduce bot bomb cooldown
+    NewBombCooldown = max(0, Data#player_data.bot_bomb_cooldown - ?TICK),
+    NewData = Data#player_data{
+        request_cooldown = NewCooldown,
+        bot_bomb_cooldown = NewBombCooldown
+    }, 
     
     % Schedule next tick
     erlang:send_after(?TICK, self(), tick),
     
-    {keep_state, NewData}.  
+    {keep_state, NewData}.
 
 handle_bot_action(Data) when Data#player_data.bot ->
-    % Simple bot AI - random actions
-    Actions = [{move, up}, {move, down}, {move, left}, {move, right}, drop_bomb],
-    Action = lists:nth(rand:uniform(length(Actions)), Actions),
+    % Generate bot action based on difficulty
+    Action = generate_bot_action(Data),
+    
+    % Update bot state
+    NewData = Data#player_data{
+        bot_action_count = Data#player_data.bot_action_count + 1,
+        bot_last_action = Action
+    },
     
     % Schedule next bot action
-    erlang:send_after(rand:uniform(1000) + 500, self(), bot_action),
+    schedule_bot_action(NewData),
     
     % Process bot action as if it came from I/O
-    handle_input_command(Action, Data).
+    handle_input_command(Action, NewData).
 
 handle_disconnect_check(Data) ->
     case Data#player_data.disconnected of
@@ -386,6 +436,122 @@ handle_disconnect_check(Data) ->
 
 handle_common_events(_Type, _Event, Data) ->
     {keep_state, Data}. % default handler for unexpected events
+
+%%%===================================================================
+%%% Bot AI Functions
+%%%===================================================================
+
+%% @doc Generate bot action based on difficulty and current state
+generate_bot_action(Data) ->
+    case Data#player_data.bot_difficulty of
+        easy -> generate_easy_action(Data);
+        medium -> generate_medium_action(Data);
+        hard -> generate_hard_action(Data)
+    end.
+
+%% @doc Easy bot - mostly random movement, occasional bombs
+generate_easy_action(Data) ->
+    case rand:uniform() < ?BOMB_PROBABILITY andalso Data#player_data.bot_bomb_cooldown =< 0 of
+        true ->
+            drop_bomb;
+        false ->
+            Directions = [up, down, left, right],
+            Direction = lists:nth(rand:uniform(length(Directions)), Directions),
+            {move, Direction}
+    end.
+
+%% @doc Medium bot - smarter movement patterns, better bomb timing
+generate_medium_action(Data) ->
+    case should_drop_bomb_medium(Data) of
+        true ->
+            drop_bomb;
+        false ->
+            case should_change_direction(Data) of
+                true ->
+                    get_smart_direction(Data);
+                false ->
+                    % Continue last direction or pick new one
+                    case Data#player_data.bot_last_action of
+                        {move, Dir} -> {move, Dir};
+                        _ -> get_smart_direction(Data)
+                    end
+            end
+    end.
+
+%% @doc Hard bot - advanced strategies, optimal bomb placement, evasion
+generate_hard_action(Data) ->
+    case should_drop_bomb_hard(Data) of
+        true ->
+            drop_bomb;
+        false ->
+            case should_use_special_ability(Data) of
+                {true, Action} ->
+                    Action;
+                false ->
+                    get_tactical_direction(Data)
+            end
+    end.
+
+%% @doc Determine if medium bot should drop bomb
+should_drop_bomb_medium(Data) ->
+    % Drop bomb every 8-12 actions, with some randomness
+    ActionMod = Data#player_data.bot_action_count rem 10,
+    BombWindow = ActionMod >= 8 andalso ActionMod =< 12,
+    RandomFactor = rand:uniform() < 0.3,
+    BombWindow andalso RandomFactor andalso Data#player_data.bot_bomb_cooldown =< 0.
+
+%% @doc Determine if hard bot should drop bomb
+should_drop_bomb_hard(Data) ->
+    % More strategic bomb placement
+    ActionMod = Data#player_data.bot_action_count rem 15,
+    BombWindow = ActionMod >= 10 andalso ActionMod =< 13,
+    RandomFactor = rand:uniform() < 0.4,
+    BombWindow andalso RandomFactor andalso Data#player_data.bot_bomb_cooldown =< 0.
+
+%% @doc Check if bot should change direction (medium difficulty)
+should_change_direction(Data) ->
+    case Data#player_data.bot_last_action of
+        {move, _} ->
+            % Change direction every 3-5 moves
+            MovesInDirection = Data#player_data.bot_action_count rem 4,
+            MovesInDirection =:= 0 orelse rand:uniform() < 0.2;
+        _ ->
+            true
+    end.
+
+%% @doc Get smart direction for medium bot
+get_smart_direction(_Data) ->
+    % For now, just random. Could be enhanced with game state awareness
+    Directions = [up, down, left, right],
+    Direction = lists:nth(rand:uniform(length(Directions)), Directions),
+    {move, Direction}.
+
+%% @doc Check if hard bot should use special abilities
+should_use_special_ability(_Data) ->
+    % Randomly use remote bomb ignition
+    case rand:uniform() < 0.05 of
+        true -> {true, ignite_remote};
+        false -> false
+    end.
+
+%% @doc Get tactical direction for hard bot
+get_tactical_direction(Data) ->
+    % Advanced movement logic - for now similar to medium
+    % Could be enhanced with pathfinding, enemy avoidance, etc.
+    get_smart_direction(Data).
+
+%% @doc Schedule next bot action based on difficulty
+schedule_bot_action(Data) ->
+    Delay = case Data#player_data.bot_difficulty of
+        easy -> ?MIN_ACTION_DELAY + rand:uniform(?MAX_ACTION_DELAY - ?MIN_ACTION_DELAY);
+        medium -> ?MIN_ACTION_DELAY + rand:uniform((?MAX_ACTION_DELAY - ?MIN_ACTION_DELAY) div 2);
+        hard -> ?MIN_ACTION_DELAY + rand:uniform((?MAX_ACTION_DELAY - ?MIN_ACTION_DELAY) div 3)
+    end,
+    erlang:send_after(Delay, self(), bot_action).
+
+%%%===================================================================
+%%% Helper Functions
+%%%===================================================================
 
 %% Helper functions
 can_send_request(Data) ->

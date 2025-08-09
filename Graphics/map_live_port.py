@@ -101,7 +101,7 @@ class CompleteGameVisualizer:
         initial_width = min(WINDOW_WIDTH, 900)
         initial_height = min(WINDOW_HEIGHT, 700)
         self.screen = pygame.display.set_mode((initial_width, initial_height), pygame.RESIZABLE)
-        pygame.display.set_caption("🎮 Playing with Fire 2 - Live Game Viewer")
+        pygame.display.set_caption("🎮 Playing with Fire 2")
         self.clock = pygame.time.Clock()
 
         # Current window dimensions
@@ -200,7 +200,7 @@ class CompleteGameVisualizer:
             return None
 
     def decode_erlang_data(self, binary_data):
-        """Decode Erlang binary term - simplified for development"""
+        """Decode Erlang binary term"""
         try:
             # For development, assume it's a string representation of Erlang terms
             text = binary_data.decode('utf-8', errors='ignore')
@@ -216,11 +216,18 @@ class CompleteGameVisualizer:
             return None
 
     def handle_port_data(self, packets):
-        """Handle received packets from Erlang ports"""
+        """Handle received packets from Erlang port"""
         for packet in packets:
             decoded_data = self.decode_erlang_data(packet)
             if decoded_data:
-                if self.waiting_for_initial_map:
+                # Check if this is a movement confirmation
+                if (isinstance(decoded_data, list) and len(decoded_data) == 2 and
+                        decoded_data[0] == 'movement_confirmation'):
+
+                    print("🏃 Received movement confirmation")
+                    self.handle_movement_confirmation(decoded_data[1])
+
+                elif self.waiting_for_initial_map:
                     # First data should be from map_generator
                     print("🗺️ Received initial map from map_generator")
                     success = self.process_initial_map(decoded_data)
@@ -232,6 +239,105 @@ class CompleteGameVisualizer:
                     # Subsequent data from cn_graphics_server
                     print("🔄 Received update from cn_graphics_server")
                     self.process_map_update(decoded_data)
+
+    def handle_movement_confirmation(self, confirmation_data):
+        """Handle immediate movement confirmation for players and bombs"""
+        entity_type = confirmation_data['entity_type']
+        entity_data = confirmation_data['entity_data']
+
+        if entity_type == 'player':
+            self.handle_player_movement_confirmation(entity_data)
+        elif entity_type == 'bomb':
+            self.handle_bomb_movement_confirmation(entity_data)
+
+    def handle_player_movement_confirmation(self, player_data):
+        """Handle immediate player movement confirmation"""
+        player_id = player_data['player_id']
+        from_pos = player_data['from_pos']
+        to_pos = player_data['to_pos']
+        direction = player_data['direction']
+        speed = player_data['speed']
+
+        # Calculate speed-aware animation duration
+        base_duration = 0.4  # Base duration
+        speed_multiplier = max(speed, 1)
+        actual_duration = base_duration / speed_multiplier
+
+        # Start immediate animation
+        self.player_animations[player_id] = {
+            'type': 'confirmed_walking',
+            'start_pos': from_pos,
+            'end_pos': to_pos,
+            'direction': direction,
+            'start_time': self.time,
+            'duration': actual_duration,
+            'speed': speed,
+            'confirmed': True,
+            'active': True
+        }
+
+        # Add speed effects if player is fast
+        if speed > 1:
+            self.create_speed_boost_effect(player_id, from_pos[0], from_pos[1], speed, direction)
+
+        print(
+            f"🏃 Player {player_id} movement confirmed: {from_pos} -> {to_pos} (speed: {speed}x, duration: {actual_duration:.2f}s)")
+
+    def handle_bomb_movement_confirmation(self, bomb_data):
+        """Handle immediate bomb movement confirmation (kicked bomb)"""
+        bomb_id = tuple(bomb_data['bomb_id'])  # Convert to tuple for dict key
+        from_pos = bomb_data['from_pos']
+        to_pos = bomb_data['to_pos']
+        direction = bomb_data['direction']
+        bomb_type = bomb_data['type']
+        owner = bomb_data['owner']
+
+        # Bombs move at a fixed speed
+        bomb_movement_duration = 0.3
+
+        # Start immediate bomb movement animation
+        self.bomb_animations[bomb_id] = {
+            'type': 'moving',
+            'start_pos': from_pos,
+            'end_pos': to_pos,
+            'direction': direction,
+            'start_time': self.time,
+            'duration': bomb_movement_duration,
+            'bomb_type': bomb_type,
+            'owner': owner,
+            'confirmed': True,
+            'active': True
+        }
+
+        # Add kick effect at the starting position
+        self.create_bomb_kick_effect(from_pos[0], from_pos[1], direction, owner)
+
+        print(f"💣 Bomb movement confirmed: {from_pos} -> {to_pos} (kicked by {owner})")
+
+    def create_speed_boost_effect(self, player_id, x, y, speed, direction):
+        """Create visual effect for speed boost"""
+        self.game_effects.append({
+            'type': 'speed_boost',
+            'player_id': player_id,
+            'x': x, 'y': y,
+            'speed': speed,
+            'direction': direction,
+            'start_time': self.time,
+            'duration': 0.8,
+            'active': True
+        })
+
+    def create_bomb_kick_effect(self, x, y, direction, kicker):
+        """Create visual effect when bomb is kicked"""
+        self.game_effects.append({
+            'type': 'bomb_kick',
+            'x': x, 'y': y,
+            'direction': direction,
+            'kicker': kicker,
+            'start_time': self.time,
+            'duration': 0.5,
+            'active': True
+        })
 
     def process_initial_map(self, map_data):
         """Process initial map from map_generator"""
@@ -324,7 +430,7 @@ class CompleteGameVisualizer:
                         if bomb_data:
                             game_state['bombs'].append(bomb_data)
 
-                    # Parse player information
+                    # Parse player information - ENHANCED to include speed
                     if player_info != 'none':
                         player_data = self.parse_player_info(player_info, x, y)
                         if player_data:
@@ -373,7 +479,7 @@ class CompleteGameVisualizer:
         return None
 
     def parse_player_info(self, player_info, x, y):
-        """Parse current player position and status"""
+        """Parse current player position and status with speed"""
         try:
             # Handle simple player atom like 'player_1'
             if isinstance(player_info, str) and 'player_' in player_info:
@@ -382,16 +488,18 @@ class CompleteGameVisualizer:
                     'player': player_num,
                     'x': x, 'y': y,
                     'health': 3,  # Default health
+                    'speed': 1,  # Default speed
                     'status': 'alive',
                     'direction': 'north',
                     'last_update': self.time
                 }
             elif isinstance(player_info, tuple) and len(player_info) >= 2:
-                # Complex player info: (player_id, health, status, direction)
+                # Complex player info: (player_id, health, speed) - ENHANCED!
                 player_id = player_info[0]
                 health = int(player_info[1]) if len(player_info) > 1 and str(player_info[1]).isdigit() else 3
-                status = player_info[2] if len(player_info) > 2 else 'alive'
-                direction = player_info[3] if len(player_info) > 3 else 'north'
+                speed = int(player_info[2]) if len(player_info) > 2 and str(player_info[2]).isdigit() else 1
+                status = player_info[3] if len(player_info) > 3 else 'alive'
+                direction = player_info[4] if len(player_info) > 4 else 'north'
 
                 if 'player_' in str(player_id):
                     player_num = int(str(player_id).split('_')[1])
@@ -399,6 +507,7 @@ class CompleteGameVisualizer:
                         'player': player_num,
                         'x': x, 'y': y,
                         'health': health,
+                        'speed': speed,  # Now includes actual speed!
                         'status': str(status),
                         'direction': str(direction),
                         'last_update': self.time
@@ -468,13 +577,15 @@ class CompleteGameVisualizer:
             if player_id in old_player_dict:
                 old_player = old_player_dict[player_id]
 
-                # Position change - create walking animation
-                if (old_player['x'], old_player['y']) != (new_player['x'], new_player['y']):
+                # Position change - only create animation if not already confirmed
+                if ((old_player['x'], old_player['y']) != (new_player['x'], new_player['y']) and
+                        player_id not in self.player_animations):
                     self.create_detailed_walking_animation(
                         player_id,
                         (old_player['x'], old_player['y']),
                         (new_player['x'], new_player['y']),
-                        new_player.get('direction', 'north')
+                        new_player.get('direction', 'north'),
+                        new_player.get('speed', 1)  # Include speed!
                     )
                     print(
                         f"🚶 Player {player_id} moved from ({old_player['x']}, {old_player['y']}) to ({new_player['x']}, {new_player['y']})")
@@ -535,7 +646,7 @@ class CompleteGameVisualizer:
                 print(f"🔥 Explosion started at {pos}")
 
     def detect_tile_changes(self, old_tiles, new_tiles):
-        """Detect tile changes (walls destroyed/created)"""
+        """Detect tile changes (walls destroyed)"""
         for x in range(MAP_SIZE):
             for y in range(MAP_SIZE):
                 old_tile = old_tiles[x][y]
@@ -563,17 +674,28 @@ class CompleteGameVisualizer:
                     self.create_powerup_spawn_animation(x, y, new_powerup)
                     print(f"🎁 Power-up '{new_powerup}' spawned at ({x}, {y})")
 
-    # Animation Creation Methods
-    def create_detailed_walking_animation(self, player_id, old_pos, new_pos, direction):
-        """Enhanced walking animation with direction and footsteps"""
+    # Animation Creation Methods - ENHANCED
+    def create_detailed_walking_animation(self, player_id, old_pos, new_pos, direction, speed=1):
+        """Enhanced walking animation with direction, speed, and footsteps"""
+        # Don't overwrite confirmed animations
+        if (player_id in self.player_animations and
+                self.player_animations[player_id].get('confirmed', False)):
+            return
+
+        # Calculate speed-aware duration
+        base_duration = 0.4
+        actual_duration = base_duration / max(speed, 1)
+
         self.player_animations[player_id] = {
             'type': 'walking',
             'start_pos': old_pos,
             'end_pos': new_pos,
             'direction': direction,
             'start_time': self.time,
-            'duration': 0.3,  # Smooth movement
+            'duration': actual_duration,
+            'speed': speed,
             'footstep_sound': True,
+            'confirmed': False,  # This is a fallback animation
             'active': True
         }
 
@@ -764,10 +886,16 @@ class CompleteGameVisualizer:
         # Update bomb animations
         for pos in list(self.bomb_animations.keys()):
             anim = self.bomb_animations[pos]
-            elapsed = current_time - anim['start_time']
-            # Keep bomb animations active until explicitly removed
-            if elapsed > 10:  # Safety timeout
-                del self.bomb_animations[pos]
+            if anim.get('type') == 'moving':
+                # Moving bomb animation
+                elapsed = current_time - anim['start_time']
+                if elapsed >= anim['duration']:
+                    del self.bomb_animations[pos]
+            else:
+                # Regular bomb countdown - keep active until explicitly removed
+                elapsed = current_time - anim['start_time']
+                if elapsed > 10:  # Safety timeout
+                    del self.bomb_animations[pos]
 
         # Update explosion animations
         self.explosion_animations = [
@@ -798,7 +926,7 @@ class CompleteGameVisualizer:
             self.camera_shake -= 1 / FPS
 
     def load_player_stats(self):
-        """Load player statistics - will be enhanced to read from game state"""
+        """Load player statistics"""
         return {
             1: {
                 'life': 3, 'speed': 1, 'bombs': 3, 'explosion_radius': 2,
@@ -1001,9 +1129,34 @@ class CompleteGameVisualizer:
                 surface.blit(glow_surf, (center_x - radius, center_y - radius))
 
     def draw_animated_bomb(self, surface, x, y, bomb_data):
-        """Draw animated bomb with countdown"""
-        center_x = x + TILE_SIZE // 2
-        center_y = y + TILE_SIZE // 2
+        """Draw animated bomb with countdown and movement"""
+        # Check for movement animation first
+        bomb_id = (bomb_data['x'], bomb_data['y'])
+        actual_x, actual_y = x, y
+
+        # Check if bomb is moving
+        if bomb_id in self.bomb_animations:
+            anim = self.bomb_animations[bomb_id]
+            if anim.get('confirmed', False) and anim['type'] == 'moving':
+                elapsed = self.time - anim['start_time']
+                progress = min(elapsed / anim['duration'], 1.0)
+
+                # Interpolate position
+                start_x, start_y = anim['start_pos']
+                end_x, end_y = anim['end_pos']
+
+                current_x = start_x + (end_x - start_x) * progress
+                current_y = start_y + (end_y - start_y) * progress
+
+                # Convert to screen coordinates
+                actual_x = current_y * TILE_SIZE
+                actual_y = current_x * TILE_SIZE
+
+                # Add movement trail effect
+                self.draw_bomb_movement_trail(surface, anim, progress)
+
+        center_x = actual_x + TILE_SIZE // 2
+        center_y = actual_y + TILE_SIZE // 2
 
         # Get bomb animation data
         bomb_anim = self.bomb_animations.get((bomb_data['x'], bomb_data['y']))
@@ -1067,21 +1220,56 @@ class CompleteGameVisualizer:
         surface.blit(bg_surf, bg_rect.topleft)
         surface.blit(timer_surface, timer_rect)
 
+    def draw_bomb_movement_trail(self, surface, anim, progress):
+        """Draw trail effect for moving bomb"""
+        start_x, start_y = anim['start_pos']
+        direction = anim['direction']
+
+        # Create motion blur effect
+        trail_length = 5
+        for i in range(trail_length):
+            trail_progress = max(0, progress - i * 0.1)
+            if trail_progress <= 0:
+                continue
+
+            trail_x = start_x + (anim['end_pos'][0] - start_x) * trail_progress
+            trail_y = start_y + (anim['end_pos'][1] - start_y) * trail_progress
+
+            screen_x = trail_y * TILE_SIZE + TILE_SIZE // 2
+            screen_y = trail_x * TILE_SIZE + TILE_SIZE // 2
+
+            alpha = int(100 * (1 - i / trail_length) * (1 - progress))
+            if alpha > 0:
+                trail_size = max(1, 12 - i * 2)
+                trail_surf = pygame.Surface((trail_size * 2, trail_size * 2), pygame.SRCALPHA)
+                pygame.draw.circle(trail_surf, (40, 40, 40, alpha),
+                                   (trail_size, trail_size), trail_size)
+                surface.blit(trail_surf, (screen_x - trail_size, screen_y - trail_size))
+
     def draw_enhanced_player_with_effects(self, surface, x, y, player_data):
-        """Draw player with all status effects and animations"""
+        """Draw player with all status effects and speed-aware animations"""
         center_x = x + TILE_SIZE // 2
         center_y = y + TILE_SIZE // 2
 
         player_num = player_data['player']
+        speed = player_data.get('speed', 1)  # Get actual speed
 
-        # Get player color
+        # Get player color with speed-based enhancement
         player_colors = {
             1: COLORS['PLAYER_1'], 2: COLORS['PLAYER_2'],
             3: COLORS['PLAYER_3'], 4: COLORS['PLAYER_4']
         }
-        outfit_color = player_colors.get(player_num, COLORS['PLAYER_1'])
+        base_color = player_colors.get(player_num, COLORS['PLAYER_1'])
 
-        # Check for walking animation
+        # Enhance color based on speed
+        if speed > 1:
+            # Make faster players glow more
+            glow_intensity = min(speed * 0.2, 0.8)
+            enhanced_color = tuple(min(255, int(c * (1 + glow_intensity))) for c in base_color)
+        else:
+            enhanced_color = base_color
+
+        # Check for walking animation with speed awareness
         char_x, char_y = x, y
         if player_num in self.player_animations:
             anim = self.player_animations[player_num]
@@ -1101,8 +1289,10 @@ class CompleteGameVisualizer:
             center_x = char_x + TILE_SIZE // 2
             center_y = char_y + TILE_SIZE // 2
 
-            # Walking bounce
-            walk_bounce = math.sin(progress * math.pi * 6) * 3
+            # Speed-based walking effects
+            anim_speed = anim.get('speed', 1)
+            walk_frequency = 6 + anim_speed * 2  # Faster players have faster leg movement
+            walk_bounce = math.sin(progress * math.pi * walk_frequency) * (2 + anim_speed * 0.5)
             center_y -= walk_bounce
 
         # Status effects
@@ -1137,10 +1327,10 @@ class CompleteGameVisualizer:
 
         # Apply effects to colors
         if death_fade < 1.0:
-            outfit_color = tuple(int(c * death_fade) for c in outfit_color)
+            enhanced_color = tuple(int(c * death_fade) for c in enhanced_color)
 
         # Draw player
-        self.draw_enhanced_player_character(surface, char_x, char_y, player_num, outfit_color)
+        self.draw_enhanced_player_character(surface, char_x, char_y, player_num, enhanced_color)
 
         # Draw status effect overlays
         if status_effect and status_effect['type'] == 'stun':
@@ -1164,8 +1354,26 @@ class CompleteGameVisualizer:
                                (TILE_SIZE, TILE_SIZE), TILE_SIZE)
             surface.blit(glow_surf, (char_x - TILE_SIZE // 2, char_y - TILE_SIZE // 2))
 
+        # Show speed boost indicator
+        if speed > 1:
+            self.draw_speed_indicator(surface, center_x, center_y + 30, speed)
+
+    def draw_speed_indicator(self, surface, x, y, speed):
+        """Draw speed boost indicator - NEW!"""
+        # Speed arrows
+        for i in range(min(speed - 1, 3)):  # Max 3 arrows
+            arrow_x = x + (i - 1) * 8
+            arrow_points = [
+                (arrow_x - 3, y + 3),
+                (arrow_x, y - 2),
+                (arrow_x + 3, y + 3),
+                (arrow_x, y + 1)
+            ]
+            pygame.draw.polygon(surface, (255, 255, 100), arrow_points)
+            pygame.draw.polygon(surface, (255, 200, 0), arrow_points, 1)
+
     def draw_enhanced_player_character(self, surface, x, y, player_num, outfit_color):
-        """Draw the actual player character (enhanced version)"""
+        """Draw the actual player character"""
         center_x = x + TILE_SIZE // 2
         center_y = y + TILE_SIZE // 2
 
@@ -1274,6 +1482,80 @@ class CompleteGameVisualizer:
 
         pygame.draw.polygon(surface, star_color, points)
         pygame.draw.polygon(surface, (255, 255, 255), points, 1)
+
+    # NEW Effect Drawing Methods
+    def draw_speed_boost_effect(self, surface, effect):
+        """Draw speed boost effect"""
+        elapsed = self.time - effect['start_time']
+        progress = elapsed / effect['duration']
+
+        if progress > 1.0:
+            return
+
+        center_x = effect['y'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = effect['x'] * TILE_SIZE + TILE_SIZE // 2
+
+        # Speed trail particles
+        speed = effect['speed']
+        trail_length = speed * 4
+
+        for i in range(trail_length):
+            particle_progress = progress + i * 0.05
+            if particle_progress > 1.0:
+                continue
+
+            # Calculate particle position based on direction
+            directions = {'north': (0, i * 3), 'south': (0, -i * 3),
+                          'east': (-i * 3, 0), 'west': (i * 3, 0)}
+            if effect['direction'] in directions:
+                dx, dy = directions[effect['direction']]
+                particle_x = center_x + dx
+                particle_y = center_y + dy
+
+                alpha = int(150 * (1 - progress) * (1 - i / trail_length))
+                if alpha > 0:
+                    particle_size = max(1, 6 - i // 2)
+                    speed_color = (100 + speed * 30, 150 + speed * 20, 255)
+                    particle_surf = pygame.Surface((particle_size * 2, particle_size * 2), pygame.SRCALPHA)
+                    pygame.draw.circle(particle_surf, (*speed_color, alpha),
+                                       (particle_size, particle_size), particle_size)
+                    surface.blit(particle_surf, (particle_x - particle_size, particle_y - particle_size))
+
+    def draw_bomb_kick_effect(self, surface, effect):
+        """Draw the kick effect when bomb starts moving"""
+        elapsed = self.time - effect['start_time']
+        progress = elapsed / effect['duration']
+
+        if progress > 1.0:
+            return
+
+        center_x = effect['y'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = effect['x'] * TILE_SIZE + TILE_SIZE // 2
+
+        # Draw impact burst
+        burst_size = int(20 * progress)
+        alpha = int(150 * (1 - progress))
+
+        if burst_size > 0 and alpha > 0:
+            # Impact starburst
+            for angle in range(0, 360, 45):
+                end_x = center_x + int(burst_size * math.cos(math.radians(angle)))
+                end_y = center_y + int(burst_size * math.sin(math.radians(angle)))
+                pygame.draw.line(surface, (255, 200, 100, alpha),
+                                 (center_x, center_y), (end_x, end_y), 3)
+
+        # Direction indicator
+        directions = {'north': (0, -1), 'south': (0, 1), 'east': (1, 0), 'west': (-1, 0)}
+        if effect['direction'] in directions:
+            dx, dy = directions[effect['direction']]
+            arrow_end_x = center_x + dx * 25
+            arrow_end_y = center_y + dy * 25
+
+            # Draw kick direction arrow
+            pygame.draw.line(surface, (255, 255, 100),
+                             (center_x, center_y), (arrow_end_x, arrow_end_y), 4)
+            # Arrow head
+            pygame.draw.circle(surface, (255, 255, 100), (arrow_end_x, arrow_end_y), 4)
 
     # Explosion drawing methods
     def draw_explosion_effect(self, surface, explosion):
@@ -1434,6 +1716,20 @@ class CompleteGameVisualizer:
                 pygame.draw.circle(surface, (100, 255, 100, alpha),
                                    (sparkle_x, sparkle_y), sparkle_size)
 
+    # ENHANCED: Draw all game effects
+    def draw_all_game_effects(self, surface):
+        """Draw all active game effects including new bomb and speed effects"""
+        for effect in self.game_effects:
+            if effect.get('type') == 'bomb_kick':
+                self.draw_bomb_kick_effect(surface, effect)
+            elif effect.get('type') == 'speed_boost':
+                self.draw_speed_boost_effect(surface, effect)
+            elif effect.get('type') == 'dust_cloud':
+                self.draw_dust_cloud_effect(surface, effect)
+            elif effect.get('type') == 'healing':
+                self.draw_healing_effect(surface, effect)
+            # Add other effects as needed
+
     # Custom icon drawing
     def draw_custom_icon(self, surface, icon_type, center_x, center_y, size, color):
         """Icons for power-ups"""
@@ -1578,12 +1874,8 @@ class CompleteGameVisualizer:
         for explosion in self.explosion_animations:
             self.draw_explosion_effect(self.map_surface, explosion)
 
-        # Draw all active game effects
-        for effect in self.game_effects:
-            if effect.get('type') == 'dust_cloud':
-                self.draw_dust_cloud_effect(self.map_surface, effect)
-            elif effect.get('type') == 'healing':
-                self.draw_healing_effect(self.map_surface, effect)
+        # Draw all active game effects (ENHANCED)
+        self.draw_all_game_effects(self.map_surface)
 
         # Draw power-up animations
         for powerup_anim in self.powerup_animations:
@@ -1621,7 +1913,7 @@ class CompleteGameVisualizer:
         self.virtual_surface.blit(self.player_panel_surface, (0, MAP_OFFSET_Y))
 
     def draw_single_player_stats(self, surface, player_id, y_pos, height, player_data):
-        """Draw individual player statistics with visual elements - improved layout"""
+        """Draw individual player statistics with live speed data"""
         stats = self.player_stats[player_id]
         player_color = stats['color']
 
@@ -1665,10 +1957,20 @@ class CompleteGameVisualizer:
             heart_x = heart_start_x + i * 12
             self.draw_mini_heart(surface, heart_x, stats_start_y + 4, (255, 100, 120))
 
-        # Speed
-        speed_text = f"Speed: {stats['speed']}"
-        speed_surface = self.small_font.render(speed_text, True, COLORS['TEXT_CYAN'])
+        # Speed - ENHANCED with live data and visual indicator
+        current_speed = player_data.get('speed', stats['speed']) if player_data else stats['speed']
+        speed_text = f"Speed: {current_speed}"
+        speed_color = COLORS['TEXT_CYAN'] if current_speed == 1 else (100, 255, 100)  # Green if boosted
+        speed_surface = self.small_font.render(speed_text, True, speed_color)
         surface.blit(speed_surface, (80, stats_start_y + stat_height))
+
+        # Add speed boost indicator
+        if current_speed > 1:
+            boost_level = current_speed - 1
+            for i in range(min(boost_level, 3)):  # Max 3 arrows
+                arrow_x = 160 + i * 8
+                arrow_y = stats_start_y + stat_height + 6
+                self.draw_mini_speed_arrow(surface, arrow_x, arrow_y)
 
         # Bombs - Draw bomb icons
         bombs_text = "Bombs:"
@@ -1757,6 +2059,17 @@ class CompleteGameVisualizer:
         pygame.draw.circle(surface, color, (x, y + 2), 3)
         pygame.draw.line(surface, color, (x, y - 1), (x - 2, y - 3), 1)
         pygame.draw.circle(surface, (255, 200, 0), (x - 2, y - 3), 1)
+
+    def draw_mini_speed_arrow(self, surface, x, y):
+        """Draw a small speed arrow"""
+        arrow_points = [
+            (x - 2, y + 2),
+            (x, y - 1),
+            (x + 2, y + 2),
+            (x, y + 1)
+        ]
+        pygame.draw.polygon(surface, (255, 255, 100), arrow_points)
+        pygame.draw.polygon(surface, (255, 200, 0), arrow_points, 1)
 
     def draw_ability_powerup_icon(self, surface, x, y, ability):
         """Draw proper powerup icons for abilities"""
@@ -1899,7 +2212,9 @@ class CompleteGameVisualizer:
 
                             for player in self.current_game_state['players']:
                                 if player['x'] == tile_x and player['y'] == tile_y:
-                                    objects_here.append(f"Player {player['player']} ({player['status']})")
+                                    speed_info = f" (speed: {player.get('speed', 1)})" if player.get('speed',
+                                                                                                     1) > 1 else ""
+                                    objects_here.append(f"Player {player['player']} ({player['status']}){speed_info}")
 
                             for bomb in self.current_game_state['bombs']:
                                 if bomb['x'] == tile_x and bomb['y'] == tile_y:
@@ -1920,6 +2235,7 @@ class CompleteGameVisualizer:
         print("🔌 Reading from Erlang ports:")
         print("   1️⃣ Initial map from map_generator")
         print("   2️⃣ Real-time updates from cn_graphics_server")
+        print("   3️⃣ ENHANCED: Immediate movement confirmations for smooth animations")
         print("🖱️ Click tiles to inspect | ESC to exit")
 
         running = True
@@ -1963,7 +2279,7 @@ class CompleteGameVisualizer:
                     status_text = "⏳ Waiting for initial map..."
                     color = COLORS['TEXT_ORANGE']
                 else:
-                    status_text = "🔄 Live updates active"
+                    status_text = "🔄 Live updates active (with movement confirmations)"
                     color = COLORS['TEXT_CYAN']
 
                 status_surface = self.small_font.render(status_text, True, color)

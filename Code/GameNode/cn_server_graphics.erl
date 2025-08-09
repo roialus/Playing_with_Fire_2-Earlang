@@ -1,4 +1,4 @@
--module(cn_graphics_server).
+-module(cn_graphics_server)
 -behaviour(gen_server).
 
 %% API
@@ -17,7 +17,9 @@
     current_map_state,            % Current unified map state
     gn_nodes,                     % List of GN nodes
     subscribed_tables = [],       % List of tables subscribed to
-    update_counter = 0            % Counter for updates (debugging)
+    update_counter = 0,           % Counter for updates (debugging)
+    movement_states = #{},        % Track active player movements
+    bomb_movements = #{}          % Track active bomb movements
 }).
 
 %%%===================================================================
@@ -34,8 +36,6 @@ start_link(GNNodes) ->
 get_current_map() ->
     gen_server:call(?MODULE, get_current_map).
 
-
-
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -43,22 +43,22 @@ get_current_map() ->
 %% Initialize the graphics server
 init([GNNodes]) ->
     io:format("🎨 CN Graphics Server starting...~n"),
-    
+   
     % Create initial state
     State = #state{gn_nodes = GNNodes},
-    
+   
     % Set up mnesia subscriptions (not sure if needs delay)
     erlang:send(self(), setup_subscriptions),
-    
+   
     % Spawn GN graphics servers (not sure if needs delay)
     erlang:send_after(30, self(), spawn_gn_servers),
-    
+   
     % Create Python port
     erlang:send(self(), create_python_port),
-    
+   
     % Start periodic updates (not sure if needs delay)
     erlang:send_after(25, self(), periodic_update),
-    
+   
     io:format("✅ CN Graphics Server initialized~n"),
     {ok, State}.
 
@@ -116,25 +116,48 @@ handle_info(periodic_update, State) ->
         current_map_state = NewMapState,
         update_counter = State#state.update_counter + 1
     },
-    
+   
     % Only send if something changed or every 10th update
-    ShouldSend = (NewMapState =/= State#state.current_map_state) orelse 
+    ShouldSend = (NewMapState =/= State#state.current_map_state) orelse
                  (State#state.update_counter rem 10 == 0),
-    
+   
     if ShouldSend ->
         send_map_to_all_targets(UpdatedState),
         io:format("🔄 Periodic update #~w sent~n", [UpdatedState#state.update_counter]);
     true -> ok
     end,
-    
+   
     % Schedule next update
     erlang:send_after(25, self(), periodic_update),
     {noreply, UpdatedState};
 
 % Handle mnesia table events
 handle_info({mnesia_table_event, {write, Table, Record, ActivityId}}, State) ->
-    io:format("📝 Mnesia write: ~w on table ~w~n", [element(2, Record), Table]),
-    handle_mnesia_update(State);
+    case Record of
+        #mnesia_players{} ->
+            % Check if this is a movement-related update
+            case detect_player_movement_change(Record, State#state.current_map_state) of
+                {movement_started, PlayerData} ->
+                    send_movement_confirmation_to_python(State, player, PlayerData),
+                    handle_mnesia_update(State);
+                no_movement_change ->
+                    io:format("📝 Mnesia write: ~w on table ~w~n", [element(2, Record), Table]),
+                    handle_mnesia_update(State)
+            end;
+        #mnesia_bombs{} ->
+            % Check if this is a bomb movement-related update
+            case detect_bomb_movement_change(Record, State#state.current_map_state) of
+                {movement_started, BombData} ->
+                    send_movement_confirmation_to_python(State, bomb, BombData),
+                    handle_mnesia_update(State);
+                no_movement_change ->
+                    io:format("📝 Mnesia write: ~w on table ~w~n", [element(2, Record), Table]),
+                    handle_mnesia_update(State)
+            end;
+        _ ->
+            io:format("📝 Mnesia write: ~w on table ~w~n", [element(2, Record), Table]),
+            handle_mnesia_update(State)
+    end;
 
 handle_info({mnesia_table_event, {delete, Table, Key, ActivityId}}, State) ->
     io:format("🗑️ Mnesia delete: ~w from table ~w~n", [Key, Table]),
@@ -161,13 +184,13 @@ handle_info(Info, State) ->
 %% Cleanup on termination
 terminate(Reason, State) ->
     io:format("🛑 CN Graphics Server terminating: ~p~n", [Reason]),
-    
+   
     % Close Python port
     if State#state.python_port =/= undefined ->
         port_close(State#state.python_port);
     true -> ok
     end,
-    
+   
     % Terminate GN graphics servers
     lists:foreach(fun({_Node, Pid}) ->
         if is_pid(Pid) andalso is_process_alive(Pid) ->
@@ -175,7 +198,7 @@ terminate(Reason, State) ->
         true -> ok
         end
     end, State#state.gn_graphics_servers),
-    
+   
     ok.
 
 %% Handle code changes
@@ -185,6 +208,100 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+%% Detect player movement changes
+detect_player_movement_change(NewRecord, CurrentMapState) ->
+    #mnesia_players{
+        player_number = PlayerNum,
+        position = [X, Y],
+        direction = Direction,
+        movement = Movement,
+        speed = Speed
+    } = NewRecord,
+   
+    % Check if movement field changed from false to {true, TimerRef}
+    case Movement of
+        {true, _TimerRef} when Direction =/= none ->
+            % Movement just started - calculate destination
+            Destination = calculate_destination([X, Y], Direction),
+            PlayerData = #{
+                player_id => PlayerNum,
+                from_pos => [X, Y],
+                to_pos => Destination,
+                direction => Direction,
+                speed => Speed,
+                movement_confirmed => true
+            },
+            {movement_started, PlayerData};
+        _ ->
+            no_movement_change
+    end.
+
+%% Detect bomb movement changes
+detect_bomb_movement_change(NewRecord, CurrentMapState) ->
+    #mnesia_bombs{
+        position = [X, Y],
+        movement = Movement,
+        direction = Direction,
+        type = Type,
+        owner = Owner,
+        radius = Radius
+    } = NewRecord,
+   
+    % Check if movement field changed from false to {true, TimerRef}
+    case Movement of
+        {true, _TimerRef} when Direction =/= none ->
+            % Bomb movement just started (kicked!)
+            Destination = calculate_destination([X, Y], Direction),
+            BombData = #{
+                bomb_id => [X, Y], % Use position as ID for bombs
+                from_pos => [X, Y],
+                to_pos => Destination,
+                direction => Direction,
+                type => Type,
+                owner => Owner,
+                radius => Radius,
+                movement_confirmed => true
+            },
+            {movement_started, BombData};
+        _ ->
+            no_movement_change
+    end.
+
+%% Calculate destination position
+calculate_destination([X, Y], Direction) ->
+    case Direction of
+        up -> [X, Y-1];
+        down -> [X, Y+1];
+        left -> [X-1, Y];
+        right -> [X+1, Y]
+    end.
+
+%% Send movement confirmation to Python
+send_movement_confirmation_to_python(State, EntityType, EntityData) ->
+    if State#state.python_port =/= undefined ->
+        try
+            ConfirmationMsg = [movement_confirmation, #{
+                entity_type => EntityType,
+                entity_data => EntityData
+            }],
+            MsgBinary = term_to_binary(ConfirmationMsg),
+            port_command(State#state.python_port, MsgBinary),
+            case EntityType of
+                player ->
+                    io:format("🏃 Player movement confirmation sent for player ~w~n",
+                             [maps:get(player_id, EntityData)]);
+                bomb ->
+                    io:format("💣 Bomb movement confirmation sent for bomb at ~w~n",
+                             [maps:get(from_pos, EntityData)])
+            end
+        catch
+            _:Error ->
+                io:format("❌ Error sending movement confirmation: ~p~n", [Error])
+        end;
+    true ->
+        ok
+    end.
 
 %% Handle mnesia updates by recreating map state
 handle_mnesia_update(State) ->
@@ -204,10 +321,10 @@ get_all_tables() ->
 setup_mnesia_subscriptions(Tables) ->
     lists:foldl(fun(Table, Acc) ->
         case mnesia:subscribe({table, Table, simple}) of
-            {ok, _} -> 
+            {ok, _} ->
                 io:format("✅ Subscribed to table: ~w~n", [Table]),
                 [Table | Acc];
-            {error, Reason} -> 
+            {error, Reason} ->
                 io:format("❌ Failed to subscribe to ~w: ~p~n", [Table, Reason]),
                 Acc
         end
@@ -218,7 +335,7 @@ spawn_all_gn_graphics_servers(GNNodes) ->
     lists:foldl(fun(Node, Acc) ->
         case spawn_gn_graphics_server(Node) of
             {ok, Pid} -> [{Node, Pid} | Acc];
-            {error, Reason} -> 
+            {error, Reason} ->
                 io:format("❌ Failed to spawn GN server on ~w: ~p~n", [Node, Reason]),
                 Acc
         end
@@ -247,7 +364,7 @@ spawn_gn_graphics_server(Node) ->
 %% Create Python visualizer port
 create_python_visualizer_port() ->
     try
-        Port = open_port({spawn, "python3 map_live_port.py"}, 
+        Port = open_port({spawn, "python3 map_live_port.py"},
                         [binary, exit_status, {packet, 4}]),
         io:format("✅ Python port created: ~p~n", [Port]),
         Port
@@ -262,19 +379,19 @@ create_current_map_state() ->
     try
         % Initialize empty map
         EmptyMap = create_empty_map(),
-        
+       
         % Add tiles from all GN tables
         MapWithTiles = add_tiles_to_map(EmptyMap),
-        
+       
         % Add powerups
         MapWithPowerups = add_powerups_to_map(MapWithTiles),
-        
+       
         % Add bombs
         MapWithBombs = add_bombs_to_map(MapWithPowerups),
-        
+       
         % Add players
         FinalMap = add_players_to_map(MapWithBombs),
-        
+       
         FinalMap
     catch
         _:Error ->
@@ -283,7 +400,7 @@ create_current_map_state() ->
 
 %% Create empty 16x16 map with free tiles
 create_empty_map() ->
-    [[{free, none, none, none, none, none} || _ <- lists:seq(1, ?MAP_SIZE)] 
+    [[{free, none, none, none, none, none} || _ <- lists:seq(1, ?MAP_SIZE)]
      || _ <- lists:seq(1, ?MAP_SIZE)].
 
 %% Add tiles from all GN tables to the map
@@ -298,7 +415,7 @@ add_tiles_from_table(Table, Map) ->
     Fun = fun() ->
         mnesia:select(Table, [{#mnesia_tiles{_ = '_'}, [], ['$_']}])
     end,
-    
+   
     case mnesia:activity(transaction, Fun) of
         TileRecords when is_list(TileRecords) ->
             lists:foldl(fun(TileRecord, AccMap) ->
@@ -312,7 +429,7 @@ add_tiles_from_table(Table, Map) ->
 %% Update map with tile information
 update_map_with_tile(Map, TileRecord) ->
     #mnesia_tiles{position = [X, Y], type = Type, contains = Contains} = TileRecord,
-    
+   
     if X >= 0, X < ?MAP_SIZE, Y >= 0, Y < ?MAP_SIZE ->
         Row = lists:nth(X + 1, Map),
         OldCell = lists:nth(Y + 1, Row),
@@ -336,7 +453,7 @@ add_powerups_from_table(Table, Map) ->
     Fun = fun() ->
         mnesia:select(Table, [{#mnesia_powerups{_ = '_'}, [], ['$_']}])
     end,
-    
+   
     case mnesia:activity(transaction, Fun) of
         PowerupRecords when is_list(PowerupRecords) ->
             lists:foldl(fun(PowerupRecord, AccMap) ->
@@ -350,7 +467,7 @@ add_powerups_from_table(Table, Map) ->
 %% Update map with powerup information
 update_map_with_powerup(Map, PowerupRecord) ->
     #mnesia_powerups{position = [X, Y], type = Type} = PowerupRecord,
-    
+   
     if X >= 0, X < ?MAP_SIZE, Y >= 0, Y < ?MAP_SIZE ->
         Row = lists:nth(X + 1, Map),
         OldCell = lists:nth(Y + 1, Row),
@@ -369,12 +486,12 @@ add_bombs_to_map(Map) ->
         add_bombs_from_table(Table, AccMap)
     end, Map, BombTables).
 
-%% Add bombs from a specific table
+%% Add bombs from a specific table, include speed info
 add_bombs_from_table(Table, Map) ->
     Fun = fun() ->
         mnesia:select(Table, [{#mnesia_bombs{_ = '_'}, [], ['$_']}])
     end,
-    
+   
     case mnesia:activity(transaction, Fun) of
         BombRecords when is_list(BombRecords) ->
             lists:foldl(fun(BombRecord, AccMap) ->
@@ -387,9 +504,9 @@ add_bombs_from_table(Table, Map) ->
 
 %% Update map with bomb information
 update_map_with_bomb(Map, BombRecord) ->
-    #mnesia_bombs{position = [X, Y], type = Type, ignited = Ignited, 
+    #mnesia_bombs{position = [X, Y], type = Type, ignited = Ignited,
                   status = Status, radius = Radius, owner = Owner} = BombRecord,
-    
+   
     if X >= 0, X < ?MAP_SIZE, Y >= 0, Y < ?MAP_SIZE ->
         Row = lists:nth(X + 1, Map),
         OldCell = lists:nth(Y + 1, Row),
@@ -402,7 +519,7 @@ update_map_with_bomb(Map, BombRecord) ->
         Map
     end.
 
-%% Add players from all tables
+%% Add players from all tables, include speed
 add_players_to_map(Map) ->
     PlayerTables = [gn1_players, gn2_players, gn3_players, gn4_players],
     lists:foldl(fun(Table, AccMap) ->
@@ -414,7 +531,7 @@ add_players_from_table(Table, Map) ->
     Fun = fun() ->
         mnesia:select(Table, [{#mnesia_players{_ = '_'}, [], ['$_']}])
     end,
-    
+   
     case mnesia:activity(transaction, Fun) of
         PlayerRecords when is_list(PlayerRecords) ->
             lists:foldl(fun(PlayerRecord, AccMap) ->
@@ -425,11 +542,11 @@ add_players_from_table(Table, Map) ->
             Map
     end.
 
-%% Update map with player information
+%% Update map with player information, with speed
 update_map_with_player(Map, PlayerRecord) ->
-    #mnesia_players{position = [X, Y], player_ID = PlayerID, 
+    #mnesia_players{position = [X, Y], player_number = PlayerID,
                     life = Life, speed = Speed} = PlayerRecord,
-    
+   
     if X >= 0, X < ?MAP_SIZE, Y >= 0, Y < ?MAP_SIZE ->
         Row = lists:nth(X + 1, Map),
         OldCell = lists:nth(Y + 1, Row),
@@ -465,18 +582,17 @@ replace_list_element(List, Pos, NewElement) ->
     {Before, [_|After]} = lists:split(Pos - 1, List),
     Before ++ [NewElement] ++ After.
 
-
 %% Send map to all targets (Python and GN servers)
 send_map_to_all_targets(State) ->
     % Send to Python visualizer
     send_map_to_python(State),
-    
+   
     % Send to GN graphics servers
     send_map_to_gn_servers(State).
 
 %% Send map to Python visualizer
 send_map_to_python(State) ->
-    if State#state.python_port =/= undefined andalso 
+    if State#state.python_port =/= undefined andalso
        State#state.current_map_state =/= undefined ->
         try
             % Convert map to binary Erlang term
