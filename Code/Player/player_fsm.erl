@@ -167,7 +167,7 @@ idle(cast, inflict_damage, Data) ->
             {next_state, dead, NewData}
     end;
 
-idle(cast, {set_bot_difficulty, Difficulty}, Data) when Data#player_data.bot ->
+idle(cast, {set_bot_difficulty, Difficulty}, Data) when Data#player_data.isBot ->
     NewData = Data#player_data{bot_difficulty = Difficulty},
     {keep_state, NewData};
 
