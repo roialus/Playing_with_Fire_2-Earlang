@@ -1,4 +1,4 @@
-
+-module(cn_graphics_server)
 -behaviour(gen_server).
 
 %% API
