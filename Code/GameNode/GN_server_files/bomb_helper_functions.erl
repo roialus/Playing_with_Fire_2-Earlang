@@ -33,27 +33,43 @@ place_bomb(PlayerNum, PlayersTableName, BombsTableName) ->
                 {ok, {BombPid, _MonitorRef}} ->
                     %% Update player's active bomb within mnesia
                     case update_player_bomb_count(PlayerNum, PlayersTableName, 1) of
-                        {atomic, _} -> ok;
-                        ok -> ok;
+                        {atomic, _} -> 
+                            %% Generate bomb record for table
+                            BombRecord = #mnesia_bombs{
+                                position = [X,Y],
+                                type = BombType,
+                                radius = BombRadius,
+                                owner = PlayerRecord#mnesia_players.pid,
+                                gn_pid = PlayerRecord#mnesia_players.target_gn,
+                                pid = BombPid},
+                            io:format("DEBUG: Created bomb record and adding to table: ~p~n", [BombsTableName]),
+                            case add_bomb_to_table(BombRecord, BombsTableName) of
+                                {atomic, _} -> bomb_placed;
+                                ok -> bomb_placed;
+                                Error2 -> 
+                                    io:format("ERROR: add_bomb_to_table failed: ~p~n", [Error2]),
+                                    {error, {failed_to_add_bomb_to_table, Error2}}
+                            end;
+                        ok -> 
+                            %% Generate bomb record for table
+                            BombRecord = #mnesia_bombs{
+                                position = [X,Y],
+                                type = BombType,
+                                radius = BombRadius,
+                                owner = PlayerRecord#mnesia_players.pid,
+                                gn_pid = PlayerRecord#mnesia_players.target_gn,
+                                pid = BombPid},
+                            io:format("DEBUG: Created bomb record and adding to table: ~p~n", [BombsTableName]),
+                            case add_bomb_to_table(BombRecord, BombsTableName) of
+                                {atomic, _} -> bomb_placed;
+                                ok -> bomb_placed;
+                                Error2 -> 
+                                    io:format("ERROR: add_bomb_to_table failed: ~p~n", [Error2]),
+                                    {error, {failed_to_add_bomb_to_table, Error2}}
+                            end;
                         Error1 -> 
                             io:format("ERROR: update_player_bomb_count failed: ~p~n", [Error1]),
                             {error, {failed_to_update_bomb_count, Error1}}
-                    end,
-                    %% Generate bomb record for table
-                    BombRecord = #mnesia_bombs{
-                        position = [X,Y],
-                        type = BombType,
-                        radius = BombRadius,
-                        owner = PlayerRecord#mnesia_players.pid,
-                        gn_pid = PlayerRecord#mnesia_players.target_gn,
-                        pid = BombPid},
-                    io:format("DEBUG: Created bomb record and adding to table: ~p~n", [BombsTableName]),
-                    case add_bomb_to_table(BombRecord, BombsTableName) of
-                        {atomic, _} -> bomb_placed;
-                        ok -> bomb_placed;
-                        Error2 -> 
-                            io:format("ERROR: add_bomb_to_table failed: ~p~n", [Error2]),
-                            {error, {failed_to_add_bomb_to_table, Error2}}
                     end;
                 Error ->
                     {error, {failed_to_create_bomb, Error}}

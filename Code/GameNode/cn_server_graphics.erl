@@ -105,9 +105,9 @@ init([GNNodes]) ->
     {ok, State}.
 
 % ADDED
-start_periodic_timer_updates(State) ->
-    erlang:send_after(?TICK_DELAY, self(), send_periodic_timer_updates),
-    State.
+%% start_periodic_timer_updates(State) ->
+%%     erlang:send_after(?TICK_DELAY, self(), send_periodic_timer_updates),
+%%     State.
 
 %%%===================================================================
 %%% Python Visualizer Startup
@@ -443,37 +443,37 @@ handle_info({'DOWN', _MonitorRef, process, _RemotePid, noconnection}, State) ->
 
 handle_info(Info, State) ->
     io:format("ℹ️ Unexpected message: ~p~n", [Info]),
-    {noreply, State};
-
-handle_info(send_periodic_timer_updates, State) ->
-    lists:foreach(fun({PlayerID, PlayerRecord}) ->
-        #mnesia_players{
-            movement_timer = MovementTimer,
-            immunity_timer = ImmunityTimer,
-            request_timer = RequestTimer,
-            position = Position,
-            speed = Speed
-        } = PlayerRecord,
-        
-        if MovementTimer > 0 orelse ImmunityTimer > 0 orelse RequestTimer > 0 ->
-            TimerData = #{
-                entity_type => player,
-                entity_data => #{
-                    player_id => PlayerID,
-                    movement_timer => MovementTimer,
-                    immunity_timer => ImmunityTimer,
-                    request_timer => RequestTimer,
-                    position => Position,
-                    speed => Speed
-                }
-            },
-            send_timer_update_to_socket(State, player, TimerData);
-        true -> ok
-        end
-    end, maps:to_list(State#state.last_known_players)),
-    
-    erlang:send_after(?TICK_DELAY, self(), send_periodic_timer_updates),
     {noreply, State}.
+
+%% handle_info(send_periodic_timer_updates, State) ->
+%%     lists:foreach(fun({PlayerID, PlayerRecord}) ->
+%%         #mnesia_players{
+%%             movement_timer = MovementTimer,
+%%             immunity_timer = ImmunityTimer,
+%%             request_timer = RequestTimer,
+%%             position = Position,
+%%             speed = Speed
+%%         } = PlayerRecord,
+%%         
+%%         if MovementTimer > 0 orelse ImmunityTimer > 0 orelse RequestTimer > 0 ->
+%%             TimerData = #{
+%%                 entity_type => player,
+%%                 entity_data => #{
+%%                     player_id => PlayerID,
+%%                     movement_timer => MovementTimer,
+%%                     immunity_timer => ImmunityTimer,
+%%                     request_timer => RequestTimer,
+%%                     position => Position,
+%%                     speed => Speed
+%%                 }
+%%             },
+%%             send_timer_update_to_socket(State, player, TimerData);
+%%         true -> ok
+%%         end
+%%     end, maps:to_list(State#state.last_known_players)),
+%%     
+%%     erlang:send_after(?TICK_DELAY, self(), send_periodic_timer_updates),
+%%     {noreply, State}.
 
 %% Cleanup on termination
 terminate(Reason, State) ->
@@ -887,30 +887,30 @@ send_timer_update_to_socket(State, EntityType, TimerData) ->
         ok
     end.
 
-send_fsm_update_to_socket(State, EntityType, FSMData) ->
-    if State#state.python_socket_pid =/= undefined ->
-        try
-            JsonMessage = #{
-                <<"type">> => <<"fsm_update">>,
-                <<"timestamp">> => erlang:system_time(millisecond),
-                <<"data">> => #{
-                    <<"entity_type">> => atom_to_utf8_binary(EntityType),
-                    <<"fsm_data">> => convert_for_json(FSMData)
-                }
-            },
-            
-            JsonBinary = jsx:encode(JsonMessage, [return_maps, strict, {encoding, utf8}]),
-            DataLength = byte_size(JsonBinary),
-            Message = <<DataLength:32/big, JsonBinary/binary>>,
-            
-            State#state.python_socket_pid ! {send_data, Message}
-        catch
-            _:Error ->
-                io:format("❌ Error sending FSM update via socket: ~p~n", [Error])
-        end;
-    true ->
-        ok
-    end.
+%% send_fsm_update_to_socket(State, EntityType, FSMData) ->
+%%     if State#state.python_socket_pid =/= undefined ->
+%%         try
+%%             JsonMessage = #{
+%%                 <<"type">> => <<"fsm_update">>,
+%%                 <<"timestamp">> => erlang:system_time(millisecond),
+%%                 <<"data">> => #{
+%%                     <<"entity_type">> => atom_to_utf8_binary(EntityType),
+%%                     <<"fsm_data">> => convert_for_json(FSMData)
+%%                 }
+%%             },
+%%             
+%%             JsonBinary = jsx:encode(JsonMessage, [return_maps, strict, {encoding, utf8}]),
+%%             DataLength = byte_size(JsonBinary),
+%%             Message = <<DataLength:32/big, JsonBinary/binary>>,
+%%             
+%%             State#state.python_socket_pid ! {send_data, Message}
+%%         catch
+%%             _:Error ->
+%%                 io:format("❌ Error sending FSM update via socket: ~p~n", [Error])
+%%         end;
+%%     true ->
+%%         ok
+%%     end.
 
 send_explosion_event_to_socket(undefined, _ExplosionData) ->
     ok;
@@ -1218,46 +1218,46 @@ detect_movement_start(PreviousRecord, NewRecord) ->
 %             end
 %     end.
 
-detect_enhanced_bomb_movement_change(NewRecord, _CurrentMapState) ->
-    #mnesia_bombs{
-        position = [X, Y],
-        movement = Movement,
-        direction = Direction,
-        type = Type,
-        owner = Owner,
-        radius = Radius,
-        status = Status,
-        ignited = Ignited
-    } = NewRecord,
-   
-    case Movement of
-        true when Direction =/= none ->
-            Destination = calculate_destination([X, Y], Direction),
-            BombData = #{
-                bomb_id => [X, Y],
-                from_pos => [X, Y],
-                to_pos => Destination,
-                direction => Direction,
-                type => Type,
-                owner => Owner,
-                radius => Radius,
-                status => Status,
-                ignited => Ignited,
-                movement_confirmed => true
-            },
-            {movement_started, BombData};
-        _ ->
-            FSMData = #{
-                bomb_id => [X, Y],
-                position => [X, Y],
-                type => Type,
-                status => Status,
-                ignited => Ignited,
-                owner => Owner,
-                radius => Radius
-            },
-            {fsm_state_change, FSMData}
-    end.
+%% detect_enhanced_bomb_movement_change(NewRecord, _CurrentMapState) ->
+%%     #mnesia_bombs{
+%%         position = [X, Y],
+%%         movement = Movement,
+%%         direction = Direction,
+%%         type = Type,
+%%         owner = Owner,
+%%         radius = Radius,
+%%         status = Status,
+%%         ignited = Ignited
+%%     } = NewRecord,
+%%    
+%%     case Movement of
+%%         true when Direction =/= none ->
+%%             Destination = calculate_destination([X, Y], Direction),
+%%             BombData = #{
+%%                 bomb_id => [X, Y],
+%%                 from_pos => [X, Y],
+%%                 to_pos => Destination,
+%%                 direction => Direction,
+%%                 type => Type,
+%%                 owner => Owner,
+%%                 radius => Radius,
+%%                 status => Status,
+%%                 ignited => Ignited,
+%%                 movement_confirmed => true
+%%             },
+%%             {movement_started, BombData};
+%%         _ ->
+%%             FSMData = #{
+%%                 bomb_id => [X, Y],
+%%                 position => [X, Y],
+%%                 type => Type,
+%%                 status => Status,
+%%                 ignited => Ignited,
+%%                 owner => Owner,
+%%                 radius => Radius
+%%             },
+%%             {fsm_state_change, FSMData}
+%%     end.
 
 calculate_destination([X, Y], Direction) ->
     case Direction of
@@ -1729,8 +1729,8 @@ handle_confirmed_player_death(PlayerID, Table, State) ->
         #mnesia_players{
             position = Position,
             life = Life,
-            speed = Speed,
-            immunity_timer = ImmunityTimer
+            speed = _Speed,
+            immunity_timer = _ImmunityTimer
         } = LastKnownState,
         io:format("💀 Player ~w confirmed dead! (was on ~w at ~w with ~w life)~n", 
                   [PlayerID, LocalGN, Position, Life]);

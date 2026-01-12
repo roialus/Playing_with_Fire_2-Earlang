@@ -179,7 +179,7 @@ handle_cast(_Msg, State) ->
 
 %%%================== handle info ==================
 %% @doc Initialization of GN_data - sets up the links to all gn_servers
-handle_info({monitor_GNs, GN_playmode_list}, IrreleventState) ->
+handle_info({monitor_GNs, GN_playmode_list}, _IrreleventState) ->
     GN_pids_list = link_GNs_loop(lists:seq(1, length(GN_playmode_list))),
     CN_data = lists:map(
         fun(Index) -> 
@@ -209,7 +209,7 @@ handle_info({graphics_ready, _GraphicsPid}, State) ->
     {noreply, State};
 
 %% @doc Handles failure messages from the monitored processes
-handle_info({'EXIT', Pid, Reason} , Data=[GN1=#gn_data{}, GN2=#gn_data{}, GN3=#gn_data{}, GN4=#gn_data{}]) -> 
+handle_info({'EXIT', Pid, Reason} , Data=[_GN1=#gn_data{}, _GN2=#gn_data{}, _GN3=#gn_data{}, _GN4=#gn_data{}]) -> 
     io:format("*CN: Linked process ~w failed, reason:~w~n",[Pid, Reason]),
     NewData = handle_gn_crash(Pid, Data),
     {noreply, NewData};
@@ -238,13 +238,13 @@ generate_table_names(GN) ->
 
 
 %% ? I used this in earlier iteration, but changed the code where it was needed. Remove this comment if its used after-all
-find_pid_by_node(TargetNode, GNList) ->
-    case lists:filter(
-        fun(#gn_data{pid = Pid}) -> node(Pid) =:= TargetNode end, GNList) of
-        
-        [#gn_data{pid = Pid}] -> Pid;
-        _ -> pid_not_found
-    end.
+%% find_pid_by_node(TargetNode, GNList) ->
+%%     case lists:filter(
+%%         fun(#gn_data{pid = Pid}) -> node(Pid) =:= TargetNode end, GNList) of
+%%         
+%%         [#gn_data{pid = Pid}] -> Pid;
+%%         _ -> pid_not_found
+%%     end.
 
 
 %% @doc Transfers a player's mnesia table from one GN to another

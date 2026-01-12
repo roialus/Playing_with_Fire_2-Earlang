@@ -114,7 +114,7 @@ handle_info({keyboard_input, Keypress}, State) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(_Reason, State) ->
+terminate(_Reason, _State) ->
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -243,31 +243,31 @@ read_keyboard_input(Key) ->
 %%%===================================================================
 %%% Keyboard control - python-based input port
 %%%===================================================================
-keyboard_input_handler(IOHandlerPid) ->
-    % Get the directory of this module and construct path to keyhelper.py
-    {ok, CurrentDir} = file:get_cwd(),
-    KeyHelperPath = filename:join([CurrentDir, "src", "Code", "Objects", "keyhelper.py"]),
-    Command = "python3 " ++ KeyHelperPath,
-    Port = open_port({spawn, Command}, [binary, exit_status]),
-    io:format("**** KEYBOARD LOOP: Started key helper port ~p with command: ~s~n", [Port, Command]),
-    keyboard_input_loop(IOHandlerPid, Port).
+%% keyboard_input_handler(IOHandlerPid) ->
+%%     % Get the directory of this module and construct path to keyhelper.py
+%%     {ok, CurrentDir} = file:get_cwd(),
+%%     KeyHelperPath = filename:join([CurrentDir, "src", "Code", "Objects", "keyhelper.py"]),
+%%     Command = "python3 " ++ KeyHelperPath,
+%%     Port = open_port({spawn, Command}, [binary, exit_status]),
+%%     io:format("**** KEYBOARD LOOP: Started key helper port ~p with command: ~s~n", [Port, Command]),
+%%     keyboard_input_loop(IOHandlerPid, Port).
 
-keyboard_input_loop(IOHandlerPid, Port) ->
-    io:format("**** KEYBOARD LOOP: Starting, waiting for input...~n"),
-    receive
-        {Port, {data, <<Key>>}} ->
-            io:format("**** KEYBOARD LOOP: Received keyboard input: ~p~n", [Key]),
-            % Convert binary to string
-            KeyString = binary_to_list(<<Key>>),
-            IOHandlerPid ! {keyboard_input, KeyString},
-            time:sleep(100), % to not overwhelm from consistent pressing, wait between transmission to IOHandler
-            keyboard_input_loop(IOHandlerPid, Port);
-        {Port, {exit_status, Status}} ->
-            io:format("**** KEYBOARD LOOP: Key helper exited with status: ~p~n", [Status]),
-            ok;
-        stop -> % TODO: should be used when ending the game? 
-            io:format("**** KEYBOARD LOOP: Stopping...~n"),
-            port_close(Port),
-            io:format("**** KEYBOARD LOOP: Stopped.~n"),
-            ok
-    end.
+%% keyboard_input_loop(IOHandlerPid, Port) ->
+%%     io:format("**** KEYBOARD LOOP: Starting, waiting for input...~n"),
+%%     receive
+%%         {Port, {data, <<Key>>}} ->
+%%             io:format("**** KEYBOARD LOOP: Received keyboard input: ~p~n", [Key]),
+%%             % Convert binary to string
+%%             KeyString = binary_to_list(<<Key>>),
+%%             IOHandlerPid ! {keyboard_input, KeyString},
+%%             time:sleep(100), % to not overwhelm from consistent pressing, wait between transmission to IOHandler
+%%             keyboard_input_loop(IOHandlerPid, Port);
+%%         {Port, {exit_status, Status}} ->
+%%             io:format("**** KEYBOARD LOOP: Key helper exited with status: ~p~n", [Status]),
+%%             ok;
+%%         stop -> % TODO: should be used when ending the game? 
+%%             io:format("**** KEYBOARD LOOP: Stopping...~n"),
+%%             port_close(Port),
+%%             io:format("**** KEYBOARD LOOP: Stopped.~n"),
+%%             ok
+%%     end.

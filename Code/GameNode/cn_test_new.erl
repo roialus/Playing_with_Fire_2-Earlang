@@ -154,7 +154,7 @@ insert_map_to_database_unified() ->
     TileCount = lists:foldl(fun(X, AccX) ->
             lists:foldl(fun(Y, AccY) ->
                 {TileType, PowerupType, _BombType, PlayerID} = test_unified_map:get_cell_at(X, Y),
-                if
+                NewAccY = if
                     TileType =/= free -> % tile "exists"
                         insert_tile([X,Y], TileType, PowerupType),
                         AccY + 1;
@@ -165,7 +165,7 @@ insert_map_to_database_unified() ->
                         ok; % TODO: PLACEHOLDER
                     true -> ok
                 end,
-                AccY
+                NewAccY
             end, AccX, lists:seq(0,15))
         end, 0, lists:seq(0,15)),
     io:format("Inserted ~p tiles into database~n", [TileCount]),
@@ -177,7 +177,7 @@ insert_map_to_database(Map) ->
     TileCount = lists:foldl(fun(X, AccX) ->
             lists:foldl(fun(Y, AccY) ->
                 {TileType, PowerupType, _BombType, PlayerID} = get_tile_content(X,Y, Map),
-                if
+                NewAccY = if
                     TileType =/= free -> % tile "exists"
                         insert_tile([X,Y], TileType, PowerupType),
                         AccY + 1;
@@ -188,7 +188,7 @@ insert_map_to_database(Map) ->
                         ok; % TODO: PLACEHOLDER
                     true -> ok
                 end,
-                AccY
+                NewAccY
             end, AccX, lists:seq(0,15))
         end, 0, lists:seq(0,15)),
     io:format("Inserted ~p tiles into database~n", [TileCount]),

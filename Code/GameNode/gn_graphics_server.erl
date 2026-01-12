@@ -229,8 +229,8 @@ handle_info(start_python_socket_client, State) ->
                 % io:format("🔍 Let's check what directories DO exist...~n"),
                 
                 % Check parent directories
-                SrcDir = filename:join([Cwd, "src"]),
-                CodeDir = filename:join([Cwd, "src", "code"]),
+                _SrcDir = filename:join([Cwd, "src"]),
+                _CodeDir = filename:join([Cwd, "src", "code"]),
                 
                 % io:format("   src exists: ~p~n", [filelib:is_dir(SrcDir)]),
                 % io:format("   src/code exists: ~p~n", [filelib:is_dir(CodeDir)]),
@@ -707,7 +707,7 @@ convert_map_for_gn_socket(Map) when is_list(Map) ->
             [EmptyRow || _ <- lists:seq(1, 16)]
     end.
 
-convert_gn_cell_safely({Tile, Powerup, Bomb, Player, Explosion, Special}) ->
+convert_gn_cell_safely({Tile, Powerup, Bomb, Player, Explosion, _Special}) ->
     [
         safe_atom_to_binary_gn(Tile),
         safe_atom_to_binary_gn(Powerup),

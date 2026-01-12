@@ -249,8 +249,9 @@ is_number_in_range(_, _) -> false.
 %% Enhanced Cell Setting with Unified Grid
 %% ===================================================================
 
-set_cell(MapState, X, Y, TileType) ->
-    set_cell(MapState, X, Y, TileType, ?NO_POWERUP, ?NO_BOMB, ?NO_PLAYER).
+%% Unused function - commented out to remove warning
+%% set_cell(MapState, X, Y, TileType) ->
+%%     set_cell(MapState, X, Y, TileType, ?NO_POWERUP, ?NO_BOMB, ?NO_PLAYER).
 
 set_cell(MapState, X, Y, TileType, PowerupType, BombType, PlayerID) ->
     Grid = MapState#map_state.grid,
@@ -284,22 +285,23 @@ set_cell_with_powerup(MapState, X, Y, TileType) ->
 
 %% Helper functions to work with cells
 get_tile_type({TileType, _, _, _}) -> TileType.
-get_powerup_type({_, PowerupType, _, _}) -> PowerupType.
-get_bomb_type({_, _, BombType, _}) -> BombType.
+%% Unused functions - commented out to remove warnings
+%% get_powerup_type({_, PowerupType, _, _}) -> PowerupType.
+%% get_bomb_type({_, _, BombType, _}) -> BombType.
 get_player_id({_, _, _, PlayerID}) -> PlayerID.
 
-%% Update cell components
-update_tile_type({_, PowerupType, BombType, PlayerID}, NewTileType) ->
-    {NewTileType, PowerupType, BombType, PlayerID}.
+%% Update cell components - commented out unused functions
+%% update_tile_type({_, PowerupType, BombType, PlayerID}, NewTileType) ->
+%%     {NewTileType, PowerupType, BombType, PlayerID}.
 
-update_powerup_type({TileType, _, BombType, PlayerID}, NewPowerupType) ->
-    {TileType, NewPowerupType, BombType, PlayerID}.
+%% update_powerup_type({TileType, _, BombType, PlayerID}, NewPowerupType) ->
+%%     {TileType, NewPowerupType, BombType, PlayerID}.
 
-update_bomb_type({TileType, PowerupType, _, PlayerID}, NewBombType) ->
-    {TileType, PowerupType, NewBombType, PlayerID}.
+%% update_bomb_type({TileType, PowerupType, _, PlayerID}, NewBombType) ->
+%%     {TileType, PowerupType, NewBombType, PlayerID}.
 
-update_player_id({TileType, PowerupType, BombType, _}, NewPlayerID) ->
-    {TileType, PowerupType, BombType, NewPlayerID}.
+%% update_player_id({TileType, PowerupType, BombType, _}, NewPlayerID) ->
+%%     {TileType, PowerupType, BombType, NewPlayerID}.
 
 update_statistics(Stats, TileType, Powerup, X, Y) ->
     % Update tile counts
@@ -376,7 +378,7 @@ is_valid_terminal({X, Y}, ExistingTerminals) ->
 
 generate_steiner_tree(Graph, Terminals) ->
     % MST of terminals with shortest paths
-    #{nodes := Nodes, edges := Edges} = Graph,
+    #{nodes := _Nodes, edges := _Edges} = Graph,
     
     % Calculate distances between all terminals
     TerminalDistances = calculate_terminal_distances(Terminals),
@@ -568,22 +570,22 @@ get_cell_at(Grid, X, Y) ->
             ?UNBREAKABLE_CELL % Out of bounds
     end.
 
-%% Get specific components from cell
-get_tile_at(Grid, X, Y) ->
-    Cell = get_cell_at(Grid, X, Y),
-    get_tile_type(Cell).
+%% Get specific components from cell - commented out unused functions
+%% get_tile_at(Grid, X, Y) ->
+%%     Cell = get_cell_at(Grid, X, Y),
+%%     get_tile_type(Cell).
 
-get_powerup_at(Grid, X, Y) ->
-    Cell = get_cell_at(Grid, X, Y),
-    get_powerup_type(Cell).
+%% get_powerup_at(Grid, X, Y) ->
+%%     Cell = get_cell_at(Grid, X, Y),
+%%     element(2, Cell).
 
-get_bomb_at(Grid, X, Y) ->
-    Cell = get_cell_at(Grid, X, Y),
-    get_bomb_type(Cell).
+%% get_bomb_at(Grid, X, Y) ->
+%%     Cell = get_cell_at(Grid, X, Y),
+%%     element(3, Cell).
 
-get_player_at(Grid, X, Y) ->
-    Cell = get_cell_at(Grid, X, Y),
-    get_player_id(Cell).
+%% get_player_at(Grid, X, Y) ->
+%%     Cell = get_cell_at(Grid, X, Y),
+%%     get_player_id(Cell).
 
 %% Enhanced visualization with complete cell information
 visualize_map(Grid) ->
@@ -631,22 +633,23 @@ visualize_map(Grid) ->
 %% Port communication for python graphical interface
 %% ===================================================================
 
+%% Unused functions - commented out to remove warnings
 %% Start the Python port for graphical interface
-start_grid_port() ->
-    Port = open_port({spawn, "python3 Graphics/map_live_port.py"}, 
-                     [binary, exit_status, {packet, 4}]),
-    register(grid_port, Port),
-    Port.
+%% start_grid_port() ->
+%%     Port = open_port({spawn, "python3 Graphics/map_live_port.py"}, 
+%%                      [binary, exit_status, {packet, 4}]),
+%%     register(grid_port, Port),
+%%     Port.
 
 %% Send the grid to the Python port for visualization
-send_grid(Grid) ->
-    Bin = term_to_binary(convert_array_grid_to_list(Grid)),
-    grid_port ! {self(), {command, Bin}}.
+%% send_grid(Grid) ->
+%%     Bin = term_to_binary(convert_array_grid_to_list(Grid)),
+%%     grid_port ! {self(), {command, Bin}}.
 
 %% Convert the array grid to a list of lists for Python visualization
-convert_array_grid_to_list(Grid) ->
-    [ [ array:get(Y, array:get(X, Grid)) || Y <- lists:seq(0, ?MAP_SIZE - 1) ]
-        || X <- lists:seq(0, ?MAP_SIZE - 1) ].
+%% convert_array_grid_to_list(Grid) ->
+%%     [ [ array:get(Y, array:get(X, Grid)) || Y <- lists:seq(0, ?MAP_SIZE - 1) ]
+%%         || X <- lists:seq(0, ?MAP_SIZE - 1) ].
 
 
 %% ===================================================================
